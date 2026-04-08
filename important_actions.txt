@@ -1,0 +1,5 @@
+cd ~/jetson-inference/build/aarch64/bin
+
+# 使用 USB 摄像头运行物体检测
+./detectnet /dev/video0
+
