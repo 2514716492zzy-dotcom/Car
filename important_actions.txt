@@ -3,3 +3,6 @@ cd ~/jetson-inference/build/aarch64/bin
 # 使用 USB 摄像头运行物体检测
 ./detectnet /dev/video0
 
+python3 -X faulthandler -c "import cv2; print('cv2 ok')"
+python3 -X faulthandler -c "import mediapipe as mp; print('mediapipe ok')"
+python3 -X faulthandler -c "import serial; print('serial ok')"
