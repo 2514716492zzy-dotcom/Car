@@ -3,7 +3,14 @@ import time
 import math
 import serial
 import mediapipe as mp
+import threading
 from collections import deque
+
+try:
+    from flask import Flask, Response
+    FLASK_AVAILABLE = True
+except Exception:
+    FLASK_AVAILABLE = False
 
 
 # =========================================================
@@ -12,9 +19,13 @@ from collections import deque
 CAMERA_INDEX = 0
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
-SHOW_WINDOW = True
+SHOW_WINDOW = False  # Jetson headless 推荐 False，通过 WEB_PREVIEW 看画面
 DEBUG_PRINT = True
 DEBUG_PRINT_INTERVAL = 0.5
+WEB_PREVIEW = True
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 5000
+WEB_JPEG_QUALITY = 80
 
 # 串口
 SERIAL_PORT = '/dev/ttyACM0'   # 按实际修改
@@ -48,6 +59,72 @@ STATE_NORMAL = "NORMAL"
 STATE_FALLING = "FALLING"
 STATE_LYING = "LYING"
 STATE_ALARM = "ALARM"
+
+
+# =========================================================
+# Web 预览（MJPEG）
+# =========================================================
+latest_jpeg = None
+latest_jpeg_lock = threading.Lock()
+
+
+def update_web_frame(frame):
+    global latest_jpeg
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), WEB_JPEG_QUALITY]
+    ok, buffer = cv2.imencode(".jpg", frame, encode_param)
+    if not ok:
+        return
+    with latest_jpeg_lock:
+        latest_jpeg = buffer.tobytes()
+
+
+def mjpeg_generator():
+    while True:
+        with latest_jpeg_lock:
+            frame = latest_jpeg
+
+        if frame is None:
+            time.sleep(0.03)
+            continue
+
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+        )
+        time.sleep(0.01)
+
+
+def start_web_preview_server():
+    app = Flask(__name__)
+
+    @app.route("/")
+    def index():
+        return (
+            "<html><body>"
+            "<h3>Pose Follow Web Preview</h3>"
+            "<img src='/video_feed' style='max-width:100%;height:auto;' />"
+            "</body></html>"
+        )
+
+    @app.route("/video_feed")
+    def video_feed():
+        return Response(
+            mjpeg_generator(),
+            mimetype="multipart/x-mixed-replace; boundary=frame"
+        )
+
+    server_thread = threading.Thread(
+        target=lambda: app.run(
+            host=WEB_HOST,
+            port=WEB_PORT,
+            debug=False,
+            threaded=True,
+            use_reloader=False
+        ),
+        daemon=True
+    )
+    server_thread.start()
+    return server_thread
 
 
 # =========================================================
@@ -396,6 +473,15 @@ def format_kp(name, kp):
 # 主程序
 # =========================================================
 def main():
+    if WEB_PREVIEW and not FLASK_AVAILABLE:
+        print("[WARN] WEB_PREVIEW=True but Flask is not installed. Disable web preview.")
+
+    web_enabled = WEB_PREVIEW and FLASK_AVAILABLE
+    if web_enabled:
+        start_web_preview_server()
+        print(f"[INFO] Web preview started: http://127.0.0.1:{WEB_PORT}/video_feed")
+        print(f"[INFO] LAN preview URL: http://<jetson-ip>:{WEB_PORT}/video_feed")
+
     cap = cv2.VideoCapture(CAMERA_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
@@ -514,6 +600,8 @@ def main():
                 lines.append(f"motion: {fall_info['motion']:.1f}")
 
             draw_text_lines(frame, lines)
+            if web_enabled:
+                update_web_frame(frame)
 
             if SHOW_WINDOW:
                 cv2.imshow("Pose Follow + Fall Detection", frame)
