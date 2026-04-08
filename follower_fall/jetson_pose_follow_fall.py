@@ -13,11 +13,13 @@ CAMERA_INDEX = 0
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 SHOW_WINDOW = True
+DEBUG_PRINT = True
+DEBUG_PRINT_INTERVAL = 0.5
 
 # 串口
 SERIAL_PORT = '/dev/ttyACM0'   # 按实际修改
 BAUD_RATE = 115200
-SERIAL_ENABLED = True
+SERIAL_ENABLED = False  # 调试模式：仅打印命令，不与 Arduino 串口通信
 
 # 关键点可见度阈值
 VISIBILITY_THRESHOLD = 0.5
@@ -228,19 +230,32 @@ class FollowController:
 
         if error_x < -TURN_THRESHOLD_PX:
             cmd = "L"
+            reason = f"target_on_left(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX})"
         elif error_x > TURN_THRESHOLD_PX:
             cmd = "R"
+            reason = f"target_on_right(error_x={error_x:.1f} > {TURN_THRESHOLD_PX})"
         else:
             if body_height < FORWARD_HEIGHT_THRESHOLD:
                 cmd = "F"
+                reason = (
+                    "centered_and_far("
+                    f"|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}, "
+                    f"body_height={body_height:.1f} < {FORWARD_HEIGHT_THRESHOLD})"
+                )
             else:
                 cmd = "S"
+                reason = (
+                    "centered_and_close("
+                    f"|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}, "
+                    f"body_height={body_height:.1f} >= {FORWARD_HEIGHT_THRESHOLD})"
+                )
 
         return {
             "cmd": cmd,
             "body_center_x": body_center_x,
             "error_x": error_x,
-            "body_height": body_height
+            "body_height": body_height,
+            "reason": reason
         }
 
 
@@ -373,6 +388,10 @@ def draw_text_lines(frame, lines, x=10, y=20, color=(0, 255, 0)):
         y += 22
 
 
+def format_kp(name, kp):
+    return f"{name}=({kp[0]:.1f},{kp[1]:.1f},vis={kp[2]:.2f})"
+
+
 # =========================================================
 # 主程序
 # =========================================================
@@ -392,6 +411,7 @@ def main():
 
     fps_hist = deque(maxlen=10)
     last_time = time.time()
+    last_debug_print_time = 0.0
 
     try:
         while True:
@@ -401,6 +421,28 @@ def main():
                 break
 
             keypoints, result = tracker.extract(frame)
+            now = time.time()
+
+            if DEBUG_PRINT and (now - last_debug_print_time) >= DEBUG_PRINT_INTERVAL:
+                h, w = frame.shape[:2]
+                has_landmarks = result is not None and result.pose_landmarks is not None
+                print(f"[DEBUG] frame_ok={ret} shape={w}x{h} landmarks={has_landmarks}")
+
+                if keypoints is not None:
+                    debug_lines = [
+                        format_kp("nose", keypoints["nose"]),
+                        format_kp("left_shoulder", keypoints["left_shoulder"]),
+                        format_kp("right_shoulder", keypoints["right_shoulder"]),
+                        format_kp("left_hip", keypoints["left_hip"]),
+                        format_kp("right_hip", keypoints["right_hip"]),
+                        format_kp("left_ankle", keypoints["left_ankle"]),
+                        format_kp("right_ankle", keypoints["right_ankle"]),
+                    ]
+                    print("[DEBUG] " + " | ".join(debug_lines))
+                else:
+                    print("[DEBUG] keypoints=None (no person detected)")
+
+                last_debug_print_time = now
 
             cmd = "S"
             orientation = "unknown"
@@ -435,10 +477,16 @@ def main():
                     else:
                         follow_info = follower.get_follow_command(shoulder_mid, hip_mid, ankle_mid)
                         cmd = follow_info["cmd"]
+                        if DEBUG_PRINT:
+                            print(f"[FOLLOW] cmd={cmd} reason={follow_info['reason']}")
                 else:
                     cmd = "S"
+                    if DEBUG_PRINT:
+                        print("[FOLLOW] cmd=S reason=missing_valid_pairs(shoulder/hip/ankle visibility)")
             else:
                 cmd = "S"
+                if DEBUG_PRINT:
+                    print("[FOLLOW] cmd=S reason=no_pose_detected")
 
             commander.send(cmd)
 
