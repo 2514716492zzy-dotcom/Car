@@ -30,7 +30,7 @@ WEB_JPEG_QUALITY = 80
 # 串口
 SERIAL_PORT = '/dev/ttyACM0'   # 按实际修改
 BAUD_RATE = 115200
-SERIAL_ENABLED = False  # 调试模式：仅打印命令，不与 Arduino 串口通信
+SERIAL_ENABLED = True # 调试模式：仅打印命令，不与 Arduino 串口通信
 
 # 关键点可见度阈值
 VISIBILITY_THRESHOLD = 0.5
@@ -319,12 +319,19 @@ class FollowController:
                     f"|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}, "
                     f"body_height={body_height:.1f} < {FORWARD_HEIGHT_THRESHOLD})"
                 )
+            elif body_height >= STOP_HEIGHT_THRESHOLD:
+                cmd = "B"
+                reason = (
+                    "centered_and_too_close("
+                    f"|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}, "
+                    f"body_height={body_height:.1f} >= {STOP_HEIGHT_THRESHOLD})"
+                )
             else:
                 cmd = "S"
                 reason = (
-                    "centered_and_close("
+                    "centered_and_keep_distance("
                     f"|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}, "
-                    f"body_height={body_height:.1f} >= {FORWARD_HEIGHT_THRESHOLD})"
+                    f"{FORWARD_HEIGHT_THRESHOLD} <= body_height={body_height:.1f} < {STOP_HEIGHT_THRESHOLD})"
                 )
 
         return {
