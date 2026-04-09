@@ -28,7 +28,7 @@ WEB_PORT = 5000
 WEB_JPEG_QUALITY = 80
 
 # 串口
-SERIAL_PORT = '/dev/ttyACM0'   # 按实际修改
+SERIAL_PORT = '/dev/ttyUSB0'   # 按实际修改
 BAUD_RATE = 115200
 SERIAL_ENABLED = True # 调试模式：仅打印命令，不与 Arduino 串口通信
 
@@ -37,8 +37,11 @@ VISIBILITY_THRESHOLD = 0.5
 
 # 跟随控制阈值
 TURN_THRESHOLD_PX = 70
-FORWARD_HEIGHT_THRESHOLD = 170
-STOP_HEIGHT_THRESHOLD = 260
+# 远距离更容易前进：把前进阈值调高一些（body_height 越小通常表示越远）
+FORWARD_HEIGHT_THRESHOLD = 210
+STOP_HEIGHT_THRESHOLD = 280
+# 当目标很远时允许更大的水平误差也可前进，避免只发 L/R 不前进
+FAR_FORWARD_X_TOLERANCE_PX = 120
 
 # 连续发命令节流
 MIN_CMD_INTERVAL = 0.10
@@ -304,19 +307,22 @@ class FollowController:
         body_center_x = (shoulder_mid[0] + hip_mid[0]) * 0.5
         error_x = body_center_x - self.frame_width * 0.5
         body_height = abs(ankle_mid[1] - shoulder_mid[1])
+        is_far = body_height < FORWARD_HEIGHT_THRESHOLD
+        x_tol_for_forward = FAR_FORWARD_X_TOLERANCE_PX if is_far else TURN_THRESHOLD_PX
 
-        if error_x < -TURN_THRESHOLD_PX:
+        # 远距离优先前进；中近距离优先先对准方向
+        if error_x < -x_tol_for_forward:
             cmd = "L"
-            reason = f"target_on_left(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX})"
-        elif error_x > TURN_THRESHOLD_PX:
+            reason = f"target_on_left(error_x={error_x:.1f} < -{x_tol_for_forward})"
+        elif error_x > x_tol_for_forward:
             cmd = "R"
-            reason = f"target_on_right(error_x={error_x:.1f} > {TURN_THRESHOLD_PX})"
+            reason = f"target_on_right(error_x={error_x:.1f} > {x_tol_for_forward})"
         else:
             if body_height < FORWARD_HEIGHT_THRESHOLD:
                 cmd = "F"
                 reason = (
                     "centered_and_far("
-                    f"|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}, "
+                    f"|error_x|={abs(error_x):.1f} <= {x_tol_for_forward}, "
                     f"body_height={body_height:.1f} < {FORWARD_HEIGHT_THRESHOLD})"
                 )
             elif body_height >= STOP_HEIGHT_THRESHOLD:
