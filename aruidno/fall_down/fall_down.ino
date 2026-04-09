@@ -21,7 +21,9 @@
 #define DIRD1 A4
 #define DIRD2 A5
 
-// -------------------- 编码器引脚（当前未使用，保留） --------------------
+// -------------------- 编码器引脚 --------------------
+// TODO: 以下 8 个引脚必须和你实际接线一致（A/B 两相）
+// TODO: 若实际接线不同，请修改这些 define
 #define ENC_A_A 18
 #define ENC_A_B 31
 #define ENC_B_A 19
@@ -32,10 +34,6 @@
 #define ENC_D_B A1
 
 // -------------------- 超声波引脚 --------------------
-#define LEFT_TRIG_PIN 6
-#define LEFT_ECHO_PIN 4
-#define RIGHT_TRIG_PIN 44
-#define RIGHT_ECHO_PIN 45
 #define FRONT_LEFT_TRIG_PIN 48
 #define FRONT_LEFT_ECHO_PIN 47
 #define FRONT_RIGHT_TRIG_PIN 33
@@ -79,15 +77,30 @@ const int SEARCH_PWM = 60;
 const int ROTATE_PWM = 40;
 const int SIDE_PWM = 70;
 
-// -------------------- 避障阈值 --------------------
+// -------------------- 避障阈值（仅安全逻辑，不参与 PID） --------------------
 const int FRONT_OBSTACLE_CM = 20;
-const int SIDE_OBSTACLE_CM = 12;
 
 // -------------------- 周期参数 --------------------
 const unsigned long SONAR_READ_INTERVAL_MS = 120UL;
 const unsigned long OLED_REFRESH_INTERVAL_MS = 250UL;
 const unsigned long ALARM_BLINK_INTERVAL_MS = 300UL;
 const unsigned long COMMAND_TIMEOUT_MS = 800UL;
+
+// -------------------- 编码器速度 PID（前进闭环） --------------------
+const unsigned long ENCODER_PID_INTERVAL_MS = 40UL;
+// TODO: 按实车调 Kp/Ki/Kd（建议先 Ki=0、Kd=0，只调 Kp）
+const float ENC_PID_KP = 1.8f;
+const float ENC_PID_KI = 0.12f;
+const float ENC_PID_KD = 0.02f;
+// TODO: 目标速度（单位：每个控制周期的编码器脉冲数）
+const float ENC_TARGET_TICKS_PER_INTERVAL = 50.0f;
+// TODO: PID 积分限幅，防止 windup
+const float ENC_PID_INTEGRAL_MAX = 200.0f;
+// TODO: PID 输出限幅（PWM 修正量）
+const int ENC_PID_OUTPUT_MAX = 80;
+// TODO: 编码器计数方向是否与当前电机“前进方向”一致；若不一致改为 -1
+const int ENC_LEFT_SIGN = 1;
+const int ENC_RIGHT_SIGN = 1;
 
 
 // ====================================================================
@@ -115,8 +128,6 @@ bool alarmToggleState = false;
 unsigned long lastAlarmBlinkMs = 0;
 
 // 超声波测距结果
-long leftDistCm = -1;
-long rightDistCm = -1;
 long frontLeftDistCm = -1;
 long frontRightDistCm = -1;
 unsigned long lastSonarReadMs = 0;
@@ -124,6 +135,29 @@ unsigned long lastSonarReadMs = 0;
 // OLED
 bool oledReady = false;
 unsigned long lastOledRefreshMs = 0;
+
+struct PidController {
+  float kp;
+  float ki;
+  float kd;
+  float integral;
+  float lastError;
+  float integralMax;
+  unsigned long lastTimeMs;
+};
+
+PidController leftSpeedPid = {ENC_PID_KP, ENC_PID_KI, ENC_PID_KD, 0.0f, 0.0f, ENC_PID_INTEGRAL_MAX, 0};
+PidController rightSpeedPid = {ENC_PID_KP, ENC_PID_KI, ENC_PID_KD, 0.0f, 0.0f, ENC_PID_INTEGRAL_MAX, 0};
+
+volatile long encoderCountA = 0;
+volatile long encoderCountB = 0;
+volatile long encoderCountC = 0;
+volatile long encoderCountD = 0;
+long lastEncoderCountA = 0;
+long lastEncoderCountB = 0;
+long lastEncoderCountC = 0;
+long lastEncoderCountD = 0;
+unsigned long lastEncoderPidUpdateMs = 0;
 
 
 // ====================================================================
@@ -244,6 +278,82 @@ void forwardBalanced(int leftPwm, int rightPwm) {
 
 
 // ====================================================================
+// 模块6b：编码器 PID（前向速度闭环）
+// ====================================================================
+
+void pidReset(PidController* pid) {
+  if (!pid) return;
+  pid->integral = 0.0f;
+  pid->lastError = 0.0f;
+  pid->lastTimeMs = 0;
+}
+
+float pidStep(PidController* pid, float target, float measured, float dt, float outputLimit) {
+  if (!pid) return 0.0f;
+  if (dt < 0.001f) dt = 0.001f;
+  if (dt > 0.2f) dt = 0.2f;
+
+  float error = target - measured;
+  pid->integral += error * dt;
+  pid->integral = constrain(pid->integral, -pid->integralMax, pid->integralMax);
+
+  float derivative = (error - pid->lastError) / dt;
+  pid->lastError = error;
+
+  float output = pid->kp * error + pid->ki * pid->integral + pid->kd * derivative;
+  return constrain(output, -outputLimit, outputLimit);
+}
+
+void resetEncoderSpeedLoop() {
+  pidReset(&leftSpeedPid);
+  pidReset(&rightSpeedPid);
+  noInterrupts();
+  lastEncoderCountA = encoderCountA;
+  lastEncoderCountB = encoderCountB;
+  lastEncoderCountC = encoderCountC;
+  lastEncoderCountD = encoderCountD;
+  interrupts();
+  lastEncoderPidUpdateMs = millis();
+}
+
+void updateForwardEncoderPidMotors() {
+  unsigned long now = millis();
+  if (now - lastEncoderPidUpdateMs < ENCODER_PID_INTERVAL_MS) return;
+  float dt = (now - lastEncoderPidUpdateMs) / 1000.0f;
+  lastEncoderPidUpdateMs = now;
+
+  long a, b, c, d;
+  noInterrupts();
+  a = encoderCountA;
+  b = encoderCountB;
+  c = encoderCountC;
+  d = encoderCountD;
+  interrupts();
+
+  long da = a - lastEncoderCountA;
+  long db = b - lastEncoderCountB;
+  long dc = c - lastEncoderCountC;
+  long dd = d - lastEncoderCountD;
+  lastEncoderCountA = a;
+  lastEncoderCountB = b;
+  lastEncoderCountC = c;
+  lastEncoderCountD = d;
+
+  // TODO: 确认 A/C 是左轮组、B/D 是右轮组；若分组不同请调整
+  float leftTicks = ((da * ENC_LEFT_SIGN) + (dc * ENC_LEFT_SIGN)) * 0.5f;
+  float rightTicks = ((db * ENC_RIGHT_SIGN) + (dd * ENC_RIGHT_SIGN)) * 0.5f;
+
+  float leftCorrection = pidStep(&leftSpeedPid, ENC_TARGET_TICKS_PER_INTERVAL, leftTicks, dt, (float)ENC_PID_OUTPUT_MAX);
+  float rightCorrection = pidStep(&rightSpeedPid, ENC_TARGET_TICKS_PER_INTERVAL, rightTicks, dt, (float)ENC_PID_OUTPUT_MAX);
+
+  int leftPwm = BASE_PWM + (int)leftCorrection;
+  int rightPwm = BASE_PWM + (int)rightCorrection;
+  // TODO: 若左右轮组基础效率不同，给 leftPwm/rightPwm 再加静态偏置
+  forwardBalanced(leftPwm, rightPwm);
+}
+
+
+// ====================================================================
 // 模块7：硬件初始化
 // ====================================================================
 
@@ -266,22 +376,39 @@ void initMotorPins() {
 }
 
 void initSonarPins() {
-  pinMode(LEFT_TRIG_PIN, OUTPUT);
-  pinMode(LEFT_ECHO_PIN, INPUT);
-
-  pinMode(RIGHT_TRIG_PIN, OUTPUT);
-  pinMode(RIGHT_ECHO_PIN, INPUT);
-
   pinMode(FRONT_LEFT_TRIG_PIN, OUTPUT);
   pinMode(FRONT_LEFT_ECHO_PIN, INPUT);
 
   pinMode(FRONT_RIGHT_TRIG_PIN, OUTPUT);
   pinMode(FRONT_RIGHT_ECHO_PIN, INPUT);
 
-  digitalWrite(LEFT_TRIG_PIN, LOW);
-  digitalWrite(RIGHT_TRIG_PIN, LOW);
   digitalWrite(FRONT_LEFT_TRIG_PIN, LOW);
   digitalWrite(FRONT_RIGHT_TRIG_PIN, LOW);
+}
+
+void initEncoderPins() {
+  pinMode(ENC_A_A, INPUT_PULLUP);
+  pinMode(ENC_A_B, INPUT_PULLUP);
+  pinMode(ENC_B_A, INPUT_PULLUP);
+  pinMode(ENC_B_B, INPUT_PULLUP);
+  pinMode(ENC_C_A, INPUT_PULLUP);
+  pinMode(ENC_C_B, INPUT_PULLUP);
+  pinMode(ENC_D_A, INPUT_PULLUP);
+  pinMode(ENC_D_B, INPUT_PULLUP);
+}
+
+void isrEncA() { encoderCountA += (digitalRead(ENC_A_A) == digitalRead(ENC_A_B)) ? 1 : -1; }
+void isrEncB() { encoderCountB += (digitalRead(ENC_B_A) == digitalRead(ENC_B_B)) ? 1 : -1; }
+void isrEncC() { encoderCountC += (digitalRead(ENC_C_A) == digitalRead(ENC_C_B)) ? 1 : -1; }
+void isrEncD() { encoderCountD += (digitalRead(ENC_D_A) == digitalRead(ENC_D_B)) ? 1 : -1; }
+
+void initEncoderInterrupts() {
+  // TODO: 确认 ENC_A_A/ENC_B_A/ENC_C_A/ENC_D_A 都接在支持外部中断的引脚上
+  // TODO: 若某一路不在中断脚，需要改为轮询或更换接线
+  attachInterrupt(digitalPinToInterrupt(ENC_A_A), isrEncA, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B_A), isrEncB, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_C_A), isrEncC, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_D_A), isrEncD, CHANGE);
 }
 
 void initAlarmPins() {
@@ -307,7 +434,7 @@ void initOLED() {
 
 
 // ====================================================================
-// 模块8：超声波读取
+// 模块8：超声波读取（仅用于避障与显示，不参与编码器 PID）
 // ====================================================================
 
 long readUltrasonicCM(int trigPin, int echoPin) {
@@ -334,10 +461,6 @@ void updateSonars() {
   frontLeftDistCm = readUltrasonicCM(FRONT_LEFT_TRIG_PIN, FRONT_LEFT_ECHO_PIN);
   delay(8);
   frontRightDistCm = readUltrasonicCM(FRONT_RIGHT_TRIG_PIN, FRONT_RIGHT_ECHO_PIN);
-  delay(8);
-  leftDistCm = readUltrasonicCM(LEFT_TRIG_PIN, LEFT_ECHO_PIN);
-  delay(8);
-  rightDistCm = readUltrasonicCM(RIGHT_TRIG_PIN, RIGHT_ECHO_PIN);
 }
 
 bool isFrontObstacle() {
@@ -345,15 +468,6 @@ bool isFrontObstacle() {
   if (frontRightDistCm > 0 && frontRightDistCm < FRONT_OBSTACLE_CM) return true;
   return false;
 }
-
-bool isLeftObstacle() {
-  return (leftDistCm > 0 && leftDistCm < SIDE_OBSTACLE_CM);
-}
-
-bool isRightObstacle() {
-  return (rightDistCm > 0 && rightDistCm < SIDE_OBSTACLE_CM);
-}
-
 
 // ====================================================================
 // 模块9：报警控制
@@ -384,6 +498,10 @@ void updateAlarmOutput() {
 // ====================================================================
 
 void applyRobotState(RobotState state) {
+  if (state != ROBOT_FORWARD) {
+    resetEncoderSpeedLoop();
+  }
+
   robotState = state;
 
   switch (state) {
@@ -392,7 +510,8 @@ void applyRobotState(RobotState state) {
       break;
 
     case ROBOT_FORWARD:
-      moveForward(BASE_PWM);
+      resetEncoderSpeedLoop();
+      // 持续输出在 loop() 的 updateForwardEncoderPidMotors()
       break;
 
     case ROBOT_BACKWARD:
@@ -443,24 +562,14 @@ void executeCommand(char cmd) {
 
     case 'L':
       alarmActive = false;
-      if (isLeftObstacle()) {
-        applyRobotState(ROBOT_STOP);
-        USB_SERIAL.println("Obstacle left -> STOP");
-      } else {
-        applyRobotState(ROBOT_LEFT);
-        USB_SERIAL.println("CMD: LEFT");
-      }
+      applyRobotState(ROBOT_LEFT);
+      USB_SERIAL.println("CMD: LEFT");
       break;
 
     case 'R':
       alarmActive = false;
-      if (isRightObstacle()) {
-        applyRobotState(ROBOT_STOP);
-        USB_SERIAL.println("Obstacle right -> STOP");
-      } else {
-        applyRobotState(ROBOT_RIGHT);
-        USB_SERIAL.println("CMD: RIGHT");
-      }
+      applyRobotState(ROBOT_RIGHT);
+      USB_SERIAL.println("CMD: RIGHT");
       break;
 
     case 'S':
@@ -508,23 +617,12 @@ void updateSafetyLogic() {
     }
   }
 
-  // 前向运动时前方避障强制停车
+  // 前向运动时前方避障强制停车（安全逻辑，非 PID）
   if (robotState == ROBOT_FORWARD && isFrontObstacle()) {
     applyRobotState(ROBOT_STOP);
     USB_SERIAL.println("Safety: front obstacle -> STOP");
   }
 
-  // 左移时左侧过近停车
-  if (robotState == ROBOT_LEFT && isLeftObstacle()) {
-    applyRobotState(ROBOT_STOP);
-    USB_SERIAL.println("Safety: left obstacle -> STOP");
-  }
-
-  // 右移时右侧过近停车
-  if (robotState == ROBOT_RIGHT && isRightObstacle()) {
-    applyRobotState(ROBOT_STOP);
-    USB_SERIAL.println("Safety: right obstacle -> STOP");
-  }
 }
 
 
@@ -570,10 +668,7 @@ void updateOLED() {
   oledDisplay.println(frontRightDistCm);
 
   oledDisplay.setCursor(0, 36);
-  oledDisplay.print("L:");
-  oledDisplay.print(leftDistCm);
-  oledDisplay.print(" R:");
-  oledDisplay.println(rightDistCm);
+  oledDisplay.println("L/R sonar removed");
 
   oledDisplay.setCursor(0, 48);
   oledDisplay.print("Alarm: ");
@@ -594,6 +689,8 @@ void setup() {
 
   initMotorPins();
   initSonarPins();
+  initEncoderPins();
+  initEncoderInterrupts();
   initAlarmPins();
   initOLED();
 
@@ -605,8 +702,13 @@ void setup() {
 
 void loop() {
   readJetsonCommand();
+  // 超声波仅用于安全避障/OLED显示，不参与 PID 闭环。
   updateSonars();
   updateSafetyLogic();
+  if (robotState == ROBOT_FORWARD) {
+    // 这里只跑编码器速度 PID
+    updateForwardEncoderPidMotors();
+  }
   updateAlarmOutput();
   updateOLED();
 }
