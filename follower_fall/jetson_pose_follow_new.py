@@ -10,7 +10,7 @@ from collections import deque
 CAMERA_INDEX = 0
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
-SHOW_WINDOW = True
+SHOW_WINDOW = False
 DEBUG_PRINT = True
 DEBUG_PRINT_INTERVAL = 0.5
 
