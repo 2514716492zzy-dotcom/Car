@@ -319,14 +319,14 @@ class FollowController:
             reason = f"target_on_right(error_x={error_x:.1f} > {x_tol_for_forward})"
         else:
             if body_height < FORWARD_HEIGHT_THRESHOLD:
-                cmd = "F"
+                cmd = "B"#"F"
                 reason = (
                     "centered_and_far("
                     f"|error_x|={abs(error_x):.1f} <= {x_tol_for_forward}, "
                     f"body_height={body_height:.1f} < {FORWARD_HEIGHT_THRESHOLD})"
                 )
             elif body_height >= STOP_HEIGHT_THRESHOLD:
-                cmd = "B"
+                cmd = "F"#"B"
                 reason = (
                     "centered_and_too_close("
                     f"|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}, "
