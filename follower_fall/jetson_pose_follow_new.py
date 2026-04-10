@@ -25,8 +25,8 @@ VISIBILITY_THRESHOLD = 0.5
 
 # 跟随阈值
 X_TOL = 50  # 水平容忍
-FORWARD_HEIGHT = 180
-STOP_HEIGHT = 300
+FORWARD_HEIGHT = 280
+STOP_HEIGHT = 320
 SHOULDER_NEAR = 140  # 肩宽阈值，小于这个说明离得远
 
 # ===================== 工具函数 =====================
