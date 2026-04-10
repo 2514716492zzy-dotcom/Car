@@ -194,26 +194,46 @@ class FollowController:
         hip_mid = self.hip_smoother.update(hip_mid)
         ankle_mid = self.ankle_smoother.update(ankle_mid)
         return shoulder_mid, hip_mid, ankle_mid
-    def get_follow_command(self,shoulder_mid,hip_mid,ankle_mid,keypoints):
-        body_center_x = (shoulder_mid[0]+hip_mid[0])*0.5
-        error_x = body_center_x - self.frame_width*0.5
-        body_height = abs(ankle_mid[1]-shoulder_mid[1])
-        shoulder_width = abs(keypoints["left_shoulder"][0]-keypoints["right_shoulder"][0])
-        cmd = "S"
-        if error_x < -X_TOL: cmd = "L"
-        elif error_x > X_TOL: cmd = "R"
-        need_forward = (body_height < FORWARD_HEIGHT) and (shoulder_width < SHOULDER_NEAR)
-        if abs(error_x)<=X_TOL:
-            if need_forward: cmd="F"
-            elif body_height>=STOP_HEIGHT: cmd="B"
-            else: cmd="S"
+    def get_follow_command(self, shoulder_mid, hip_mid, ankle_mid, keypoints):
+        # 计算身体中心
+        body_center_x = (shoulder_mid[0] + hip_mid[0]) * 0.5
+        error_x = body_center_x - self.frame_width * 0.5
+    
+        # 身体高度和肩宽
+        body_height = abs(ankle_mid[1] - shoulder_mid[1])
+        shoulder_width = abs(keypoints["left_shoulder"][0] - keypoints["right_shoulder"][0])
+    
+        # 决策逻辑
+        cmd = "S"  # 默认停止
+    
+        # 前后优先
+        if body_height < FORWARD_HEIGHT:
+            cmd = "F"
+        elif body_height >= STOP_HEIGHT:
+            cmd = "B"
         else:
-            if need_forward: cmd+="F"
-        reason = f"error_x={error_x:.1f}, body_height={body_height:.1f}, shoulder_width={shoulder_width:.1f}, cmd={cmd}"
-        return {"cmd":cmd,"body_center_x":body_center_x,"error_x":error_x,
-                "body_height":body_height,"shoulder_width":shoulder_width,
-                "reason":reason,"shoulder_mid":shoulder_mid,"hip_mid":hip_mid,
-                "ankle_mid":ankle_mid}
+            # 高度合适，再判断横向
+            if error_x < -X_TOL:
+                cmd = "L"
+            elif error_x > X_TOL:
+                cmd = "R"
+            else:
+                cmd = "S"
+    
+        reason = (f"error_x={error_x:.1f}, body_height={body_height:.1f}, "
+                  f"shoulder_width={shoulder_width:.1f}, cmd={cmd}")
+        
+        return {
+            "cmd": cmd,
+            "body_center_x": body_center_x,
+            "error_x": error_x,
+            "body_height": body_height,
+            "shoulder_width": shoulder_width,
+            "reason": reason,
+            "shoulder_mid": shoulder_mid,
+            "hip_mid": hip_mid,
+            "ankle_mid": ankle_mid
+        }
     def should_send(self, cmd):
         """串口节流"""
         now = time.time()
