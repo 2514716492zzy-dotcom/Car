@@ -6,11 +6,18 @@ import mediapipe as mp
 import threading
 from collections import deque
 
+# ===================== Web预览支持 =====================
+try:
+    from flask import Flask, Response
+    FLASK_AVAILABLE = True
+except Exception:
+    FLASK_AVAILABLE = False
+
 # ===================== 配置 =====================
 CAMERA_INDEX = 0
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
-SHOW_WINDOW = False
+SHOW_WINDOW = False  # Jetson headless设为False
 DEBUG_PRINT = True
 DEBUG_PRINT_INTERVAL = 0.5
 
@@ -18,16 +25,93 @@ SERIAL_PORT = '/dev/ttyUSB0'
 BAUD_RATE = 115200
 SERIAL_ENABLED = False  # 调试先关闭串口
 
+# ===================== Web预览配置 =====================
 WEB_PREVIEW = True
-MIN_CMD_INTERVAL = 0.1
-SMOOTH_ALPHA = 0.35
-VISIBILITY_THRESHOLD = 0.5
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 5000
+WEB_JPEG_QUALITY = 80
 
 # 跟随阈值
 X_TOL = 50  # 水平容忍
 FORWARD_HEIGHT = 280
 STOP_HEIGHT = 320
 SHOULDER_NEAR = 140  # 肩宽阈值，小于这个说明离得远
+
+# 串口节流
+MIN_CMD_INTERVAL = 0.1
+SMOOTH_ALPHA = 0.35
+VISIBILITY_THRESHOLD = 0.5
+
+# ===================== Web预览变量 =====================
+latest_jpeg = None
+latest_jpeg_lock = threading.Lock()
+
+def update_web_frame(frame):
+    """更新Web预览帧"""
+    global latest_jpeg
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), WEB_JPEG_QUALITY]
+    ok, buffer = cv2.imencode(".jpg", frame, encode_param)
+    if not ok:
+        return
+    with latest_jpeg_lock:
+        latest_jpeg = buffer.tobytes()
+
+def mjpeg_generator():
+    """MJPEG流生成器"""
+    while True:
+        with latest_jpeg_lock:
+            frame = latest_jpeg
+        if frame is None:
+            time.sleep(0.03)
+            continue
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+        )
+        time.sleep(0.01)
+
+def start_web_preview_server():
+    """启动Flask Web服务器"""
+    app = Flask(__name__)
+
+    @app.route("/")
+    def index():
+        return (
+            "<html><body>"
+            "<h3>Pose Follow Web Preview</h3>"
+            "<img src='/video_feed' style='max-width:100%;height:auto;' />"
+            "<hr>"
+            "<p>命令说明：</p>"
+            "<ul>"
+            "<li><b>F</b> - 前进</li>"
+            "<li><b>B</b> - 后退</li>"
+            "<li><b>L</b> - 左转</li>"
+            "<li><b>R</b> - 右转</li>"
+            "<li><b>S</b> - 停止</li>"
+            "</ul>"
+            "</body></html>"
+        )
+
+    @app.route("/video_feed")
+    def video_feed():
+        return Response(
+            mjpeg_generator(),
+            mimetype="multipart/x-mixed-replace; boundary=frame"
+        )
+
+    server_thread = threading.Thread(
+        target=lambda: app.run(
+            host=WEB_HOST,
+            port=WEB_PORT,
+            debug=False,
+            threaded=True,
+            use_reloader=False
+        ),
+        daemon=True
+    )
+    server_thread.start()
+    print(f"[INFO] Web preview started: http://{WEB_HOST}:{WEB_PORT}")
+    return server_thread
 
 # ===================== 工具函数 =====================
 def midpoint(p1, p2):
@@ -91,6 +175,8 @@ class FollowController:
         self.shoulder_smoother = ExpSmoother2D(SMOOTH_ALPHA)
         self.hip_smoother = ExpSmoother2D(SMOOTH_ALPHA)
         self.ankle_smoother = ExpSmoother2D(SMOOTH_ALPHA)
+        self.last_cmd = None
+        self.last_send_time = 0
     def get_body_points(self,keypoints):
         ls = keypoints["left_shoulder"]
         rs = keypoints["right_shoulder"]
@@ -128,6 +214,14 @@ class FollowController:
                 "body_height":body_height,"shoulder_width":shoulder_width,
                 "reason":reason,"shoulder_mid":shoulder_mid,"hip_mid":hip_mid,
                 "ankle_mid":ankle_mid}
+    def should_send(self, cmd):
+        """串口节流"""
+        now = time.time()
+        if cmd == self.last_cmd and (now - self.last_send_time) < MIN_CMD_INTERVAL:
+            return False
+        self.last_cmd = cmd
+        self.last_send_time = now
+        return True
 
 # ===================== 可视化 =====================
 def draw_point(frame,p,color,label):
@@ -143,59 +237,123 @@ def draw_text_lines(frame,lines,x=10,y=20,color=(0,255,0)):
 class SerialCommander:
     def __init__(self,port,baud,enabled=False):
         self.enabled=enabled
+        self.ser = None
+        if enabled:
+            try:
+                self.ser = serial.Serial(port, baud, timeout=1)
+                time.sleep(2)
+                print(f"[INFO] Serial connected: {port}")
+            except Exception as e:
+                print(f"[WARN] Serial not available: {e}")
+                self.enabled = False
     def send(self,cmd,force=False):
-        print(f"[CMD] {cmd}")
-    def close(self): pass
+        if not self.enabled:
+            print(f"[CMD] {cmd}")
+            return
+        if self.ser:
+            try:
+                self.ser.write((cmd+'\n').encode())
+            except Exception as e:
+                print(f"[WARN] Serial write failed: {e}")
+    def close(self):
+        if self.ser:
+            self.ser.close()
 
 # ===================== 主循环 =====================
 def main():
+    # 启动Web预览
+    if WEB_PREVIEW and FLASK_AVAILABLE:
+        start_web_preview_server()
+        print(f"[INFO] Web preview: http://127.0.0.1:{WEB_PORT}")
+    elif WEB_PREVIEW and not FLASK_AVAILABLE:
+        print("[WARN] WEB_PREVIEW=True but Flask not installed. Run: pip install flask")
+    
     cap = cv2.VideoCapture(CAMERA_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-    if not cap.isOpened(): print("[ERROR] Cannot open camera"); return
+    if not cap.isOpened(): 
+        print("[ERROR] Cannot open camera")
+        return
+    
     tracker = PoseTracker()
     follower = FollowController(FRAME_WIDTH)
-    commander = SerialCommander(SERIAL_PORT,BAUD_RATE,SERIAL_ENABLED)
+    commander = SerialCommander(SERIAL_PORT, BAUD_RATE, SERIAL_ENABLED)
     fps_hist = deque(maxlen=10)
     last_time = time.time()
     last_debug = 0.0
+    
     try:
         while True:
             ret, frame = cap.read()
-            if not ret: break
-            keypoints,result = tracker.extract(frame)
+            if not ret: 
+                break
+            
+            keypoints, result = tracker.extract(frame)
             now = time.time()
+            
+            # 绘制骨骼关键点
+            if result and result.pose_landmarks:
+                mp.solutions.drawing_utils.draw_landmarks(
+                    frame,
+                    result.pose_landmarks,
+                    mp.solutions.pose.POSE_CONNECTIONS
+                )
+            
             if keypoints:
                 body_points = follower.get_body_points(keypoints)
                 if body_points:
-                    shoulder_mid,hip_mid,ankle_mid = body_points
-                    draw_point(frame,shoulder_mid,(255,0,0),"ShoulderMid")
-                    draw_point(frame,hip_mid,(0,255,0),"HipMid")
-                    draw_point(frame,ankle_mid,(0,0,255),"AnkleMid")
-                    follow_info = follower.get_follow_command(shoulder_mid,hip_mid,ankle_mid,keypoints)
+                    shoulder_mid, hip_mid, ankle_mid = body_points
+                    draw_point(frame, shoulder_mid, (255,0,0), "ShoulderMid")
+                    draw_point(frame, hip_mid, (0,255,0), "HipMid")
+                    draw_point(frame, ankle_mid, (0,0,255), "AnkleMid")
+                    
+                    follow_info = follower.get_follow_command(shoulder_mid, hip_mid, ankle_mid, keypoints)
                     cmd = follow_info["cmd"]
-                    # 调试信息
-                    print(f"[FOLLOW DEBUG] {follow_info['reason']}")
-                    print(f"  ShoulderMid={follow_info['shoulder_mid']}, HipMid={follow_info['hip_mid']}, AnkleMid={follow_info['ankle_mid']}")
+                    
+                    # 节流发送
+                    if follower.should_send(cmd):
+                        commander.send(cmd)
+                    
+                    if DEBUG_PRINT and (now - last_debug) >= DEBUG_PRINT_INTERVAL:
+                        print(f"[FOLLOW] {follow_info['reason']}")
+                        last_debug = now
                 else:
-                    cmd="S"
-                    print("[FOLLOW DEBUG] missing keypoints")
+                    cmd = "S"
+                    if follower.should_send(cmd):
+                        commander.send(cmd)
+                    if DEBUG_PRINT and (now - last_debug) >= DEBUG_PRINT_INTERVAL:
+                        print("[FOLLOW] missing keypoints")
+                        last_debug = now
             else:
-                cmd="S"
-                print("[FOLLOW DEBUG] no pose detected")
-            commander.send(cmd)
+                cmd = "S"
+                if follower.should_send(cmd):
+                    commander.send(cmd)
+                if DEBUG_PRINT and (now - last_debug) >= DEBUG_PRINT_INTERVAL:
+                    print("[FOLLOW] no pose detected")
+                    last_debug = now
+            
             # FPS显示
             fps = 1.0/max(now-last_time,1e-6)
             last_time = now
             fps_hist.append(fps)
             fps_avg = sum(fps_hist)/len(fps_hist)
-            lines=[f"CMD:{cmd}",f"FPS:{fps_avg:.1f}"]
-            if keypoints and body_points: lines.append(f"body_h:{follow_info['body_height']:.1f} shoulder_w:{follow_info['shoulder_width']:.1f} error_x:{follow_info['error_x']:.1f}")
-            draw_text_lines(frame,lines)
+            
+            lines = [f"CMD:{cmd}", f"FPS:{fps_avg:.1f}"]
+            if keypoints and body_points:
+                lines.append(f"body_h:{follow_info['body_height']:.1f} shoulder_w:{follow_info['shoulder_width']:.1f} error_x:{follow_info['error_x']:.1f}")
+            draw_text_lines(frame, lines)
+            
+            # 更新Web预览
+            if WEB_PREVIEW and FLASK_AVAILABLE:
+                update_web_frame(frame)
+            
             if SHOW_WINDOW:
-                cv2.imshow("Follow",frame)
-                if cv2.waitKey(1)&0xFF in [27,ord('q')]: break
+                cv2.imshow("Follow", frame)
+                if cv2.waitKey(1)&0xFF in [27, ord('q')]:
+                    break
+                    
     finally:
+        commander.send("S", force=True)
         commander.close()
         cap.release()
         cv2.destroyAllWindows()
