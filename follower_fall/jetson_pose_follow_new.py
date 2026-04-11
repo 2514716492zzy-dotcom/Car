@@ -33,9 +33,9 @@ WEB_JPEG_QUALITY = 80
 
 # 跟随阈值
 X_TOL = 50  # 水平容忍
-FORWARD_HEIGHT = 280
-STOP_HEIGHT = 320
-SHOULDER_NEAR = 140  # 肩宽阈值，小于这个说明离得远
+FORWARD_HEIGHT = 300
+STOP_HEIGHT = 360
+SHOULDER_NEAR = 100  # 肩宽阈值，小于这个说明离得远
 
 # 串口节流
 MIN_CMD_INTERVAL = 0.1
