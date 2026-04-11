@@ -23,7 +23,7 @@ DEBUG_PRINT_INTERVAL = 0.5
 
 SERIAL_PORT = '/dev/ttyUSB0'
 BAUD_RATE = 115200
-SERIAL_ENABLED = False  # 调试先关闭串口
+SERIAL_ENABLED = True  # 调试先关闭串口
 
 # ===================== Web预览配置 =====================
 WEB_PREVIEW = True
