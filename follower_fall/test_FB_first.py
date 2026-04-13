@@ -39,7 +39,7 @@ VISIBILITY_THRESHOLD = 0.5
 TURN_THRESHOLD_PX = 70
 FORWARD_HEIGHT_THRESHOLD = 320
 STOP_HEIGHT_THRESHOLD = 400
-FAR_FORWARD_X_TOLERANCE_PX = 90
+FAR_FORWARD_X_TOLERANCE_PX = 120
 FB_PULSE_SEC = 1.0
 
 # 连续发命令节流
@@ -254,6 +254,7 @@ class FollowController:
         self.ankle_smoother = ExpSmoother2D(SMOOTH_ALPHA)
         self.fb_pulse_cmd = None
         self.fb_pulse_end_time = 0.0
+        self.lr_align_active = False
 
     def get_body_points(self, keypoints):
         ls = keypoints["left_shoulder"]
@@ -314,14 +315,33 @@ class FollowController:
         if FORWARD_HEIGHT_THRESHOLD <= body_height < STOP_HEIGHT_THRESHOLD:
             self.fb_pulse_cmd = None
             self.fb_pulse_end_time = 0.0
+            self.lr_align_active = False
             cmd = "S"
             reason = (
                 f"distance_reached({FORWARD_HEIGHT_THRESHOLD} <= body_height={body_height:.1f} < "
                 f"{STOP_HEIGHT_THRESHOLD}) -> stop follow"
             )
         else:
+            # 左右对齐阶段：一旦触发，就持续左右移动直到回到中心
+            if self.lr_align_active:
+                if error_x < -TURN_THRESHOLD_PX:
+                    cmd = "L"
+                    reason = (
+                        f"lr_align_active(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> keep L"
+                    )
+                elif error_x > TURN_THRESHOLD_PX:
+                    cmd = "R"
+                    reason = (
+                        f"lr_align_active(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> keep R"
+                    )
+                else:
+                    self.lr_align_active = False
+                    cmd = "S"
+                    reason = (
+                        f"lr_align_done(|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}) -> S"
+                    )
             # 前后脉冲阶段：每次 F/B 只执行 1s
-            if self.fb_pulse_cmd is not None and now < self.fb_pulse_end_time:
+            elif self.fb_pulse_cmd is not None and now < self.fb_pulse_end_time:
                 cmd = self.fb_pulse_cmd
                 reason = (
                     f"fb_pulse_active(cmd={cmd}, remain={self.fb_pulse_end_time - now:.2f}s)"
@@ -331,14 +351,16 @@ class FollowController:
                 self.fb_pulse_cmd = None
                 self.fb_pulse_end_time = 0.0
                 if error_x < -TURN_THRESHOLD_PX:
+                    self.lr_align_active = True
                     cmd = "L"
                     reason = (
-                        f"after_1s_fb_check_center(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> L"
+                        f"after_1s_fb_check_center(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> start L-align"
                     )
                 elif error_x > TURN_THRESHOLD_PX:
+                    self.lr_align_active = True
                     cmd = "R"
                     reason = (
-                        f"after_1s_fb_check_center(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> R"
+                        f"after_1s_fb_check_center(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> start R-align"
                     )
                 else:
                     cmd = "S"
