@@ -72,10 +72,10 @@ Adafruit_SSD1306 oledDisplay(OLED_SCREEN_WIDTH, OLED_SCREEN_HEIGHT, &Wire, OLED_
 // -------------------- PWM 设置 --------------------
 const int PWM_MIN = 0;
 const int PWM_MAX = 255;
-const int BASE_PWM = 80;
+const int BASE_PWM = 40;
 const int SEARCH_PWM = 60;
 const int ROTATE_PWM = 40;
-const int SIDE_PWM = 70;
+const int SIDE_PWM = 40;
 
 // -------------------- 避障阈值（仅安全逻辑，不参与 PID） --------------------
 const int FRONT_OBSTACLE_CM = 20;

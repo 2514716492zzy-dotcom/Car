@@ -37,9 +37,10 @@ VISIBILITY_THRESHOLD = 0.5
 
 # 跟随控制阈值
 TURN_THRESHOLD_PX = 70
-FORWARD_HEIGHT_THRESHOLD = 270
-STOP_HEIGHT_THRESHOLD = 320
-FAR_FORWARD_X_TOLERANCE_PX = 120
+FORWARD_HEIGHT_THRESHOLD = 320
+STOP_HEIGHT_THRESHOLD = 400
+FAR_FORWARD_X_TOLERANCE_PX = 90
+FB_PULSE_SEC = 1.0
 
 # 连续发命令节流
 MIN_CMD_INTERVAL = 0.10
@@ -251,6 +252,8 @@ class FollowController:
         self.shoulder_smoother = ExpSmoother2D(SMOOTH_ALPHA)
         self.hip_smoother = ExpSmoother2D(SMOOTH_ALPHA)
         self.ankle_smoother = ExpSmoother2D(SMOOTH_ALPHA)
+        self.fb_pulse_cmd = None
+        self.fb_pulse_end_time = 0.0
 
     def get_body_points(self, keypoints):
         ls = keypoints["left_shoulder"]
@@ -305,30 +308,61 @@ class FollowController:
         body_center_x = (shoulder_mid[0] + hip_mid[0]) * 0.5
         error_x = body_center_x - self.frame_width * 0.5
         body_height = abs(ankle_mid[1] - shoulder_mid[1])
-        is_far = body_height < FORWARD_HEIGHT_THRESHOLD
-        x_tol_for_forward = FAR_FORWARD_X_TOLERANCE_PX if is_far else TURN_THRESHOLD_PX
+        now = time.time()
 
-        # ===== 修改逻辑：先前进/后退，再左右 =====
-        if body_height < FORWARD_HEIGHT_THRESHOLD:
-            cmd = "F"
+        # 到达前后目标距离区间后，停止跟随（按你的需求）
+        if FORWARD_HEIGHT_THRESHOLD <= body_height < STOP_HEIGHT_THRESHOLD:
+            self.fb_pulse_cmd = None
+            self.fb_pulse_end_time = 0.0
+            cmd = "S"
             reason = (
-                f"body_height={body_height:.1f} < {FORWARD_HEIGHT_THRESHOLD} -> move forward"
-            )
-        elif body_height >= STOP_HEIGHT_THRESHOLD:
-            cmd = "B"
-            reason = (
-                f"body_height={body_height:.1f} >= {STOP_HEIGHT_THRESHOLD} -> move back"
+                f"distance_reached({FORWARD_HEIGHT_THRESHOLD} <= body_height={body_height:.1f} < "
+                f"{STOP_HEIGHT_THRESHOLD}) -> stop follow"
             )
         else:
-            if error_x < -TURN_THRESHOLD_PX:
-                cmd = "L"
-                reason = f"error_x={error_x:.1f} < -{TURN_THRESHOLD_PX} -> turn left"
-            elif error_x > TURN_THRESHOLD_PX:
-                cmd = "R"
-                reason = f"error_x={error_x:.1f} > {TURN_THRESHOLD_PX} -> turn right"
+            # 前后脉冲阶段：每次 F/B 只执行 1s
+            if self.fb_pulse_cmd is not None and now < self.fb_pulse_end_time:
+                cmd = self.fb_pulse_cmd
+                reason = (
+                    f"fb_pulse_active(cmd={cmd}, remain={self.fb_pulse_end_time - now:.2f}s)"
+                )
+            elif self.fb_pulse_cmd is not None and now >= self.fb_pulse_end_time:
+                # 脉冲刚结束：先检查是否居中，再决定要不要 L/R
+                self.fb_pulse_cmd = None
+                self.fb_pulse_end_time = 0.0
+                if error_x < -TURN_THRESHOLD_PX:
+                    cmd = "L"
+                    reason = (
+                        f"after_1s_fb_check_center(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> L"
+                    )
+                elif error_x > TURN_THRESHOLD_PX:
+                    cmd = "R"
+                    reason = (
+                        f"after_1s_fb_check_center(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> R"
+                    )
+                else:
+                    cmd = "S"
+                    reason = (
+                        f"after_1s_fb_check_center(|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}) -> S"
+                    )
             else:
-                cmd = "S"
-                reason = "centered -> stop"
+                # 新一轮前后 1s 脉冲
+                if body_height < FORWARD_HEIGHT_THRESHOLD:
+                    self.fb_pulse_cmd = "F"
+                    self.fb_pulse_end_time = now + FB_PULSE_SEC
+                    cmd = "F"
+                    reason = (
+                        f"too_far(body_height={body_height:.1f} < {FORWARD_HEIGHT_THRESHOLD}) "
+                        f"-> F for {FB_PULSE_SEC:.1f}s"
+                    )
+                else:
+                    self.fb_pulse_cmd = "B"
+                    self.fb_pulse_end_time = now + FB_PULSE_SEC
+                    cmd = "B"
+                    reason = (
+                        f"too_close(body_height={body_height:.1f} >= {STOP_HEIGHT_THRESHOLD}) "
+                        f"-> B for {FB_PULSE_SEC:.1f}s"
+                    )
 
         return {
             "cmd": cmd,
