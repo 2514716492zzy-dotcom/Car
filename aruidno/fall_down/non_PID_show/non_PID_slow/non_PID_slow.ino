@@ -160,7 +160,7 @@ void moveRight(int pwm) {
 }
 
 void rotateLeft(int pwm) {
-  int p = clampPwm(pwm-30);
+  int p = clampPwm(pwm-20);
   // 与你提供的 rotate_1 方向一致：四轮 BACKOFF
   MOTORA_BACKOFF(p);
   MOTORB_BACKOFF(p);
@@ -168,8 +168,8 @@ void rotateLeft(int pwm) {
   MOTORD_BACKOFF(p);
 }
 
-void rotateRight(int pwm)
-  int p = clampPwm(pwm-30);
+void rotateRight(int pwm) {
+  int p = clampPwm(pwm-20);
   // 与你提供的 rotate_2 方向一致：四轮 FORWARD
   MOTORA_FORWARD(p);
   MOTORB_FORWARD(p);
