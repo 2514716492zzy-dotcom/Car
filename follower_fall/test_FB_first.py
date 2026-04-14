@@ -26,6 +26,7 @@ WEB_PREVIEW = True
 WEB_HOST = "0.0.0.0"
 WEB_PORT = 5000
 WEB_JPEG_QUALITY = 80
+ENABLE_FALL_DETECTION = True
 
 # 串口
 SERIAL_PORT = '/dev/ttyUSB0'   # 按实际修改
@@ -638,13 +639,19 @@ def main():
                     draw_point(frame, ankle_mid, (0, 0, 255), "AnkleMid")
 
                     orientation = follower.estimate_orientation(keypoints)
-                    fall_info = fall_detector.update(shoulder_mid, hip_mid, ankle_mid)
+                    if ENABLE_FALL_DETECTION:
+                        fall_info = fall_detector.update(shoulder_mid, hip_mid, ankle_mid)
 
-                    # 跌倒优先级 > 跟随
-                    if fall_info["state"] == STATE_ALARM:
-                        cmd = "A\n"
-                    elif fall_info["state"] in [STATE_FALLING, STATE_LYING]:
-                        cmd = "S\n"
+                        # 跌倒优先级 > 跟随
+                        if fall_info["state"] == STATE_ALARM:
+                            cmd = "A\n"
+                        elif fall_info["state"] in [STATE_FALLING, STATE_LYING]:
+                            cmd = "S\n"
+                        else:
+                            follow_info = follower.get_follow_command(shoulder_mid, hip_mid, ankle_mid)
+                            cmd = follow_info["cmd"]
+                            if DEBUG_PRINT:
+                                print(f"[FOLLOW] cmd={cmd} reason={follow_info['reason']}")
                     else:
                         follow_info = follower.get_follow_command(shoulder_mid, hip_mid, ankle_mid)
                         cmd = follow_info["cmd"]
