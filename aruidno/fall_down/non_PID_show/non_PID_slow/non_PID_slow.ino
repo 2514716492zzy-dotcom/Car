@@ -67,6 +67,8 @@ enum RobotState {
   ROBOT_BACKWARD,
   ROBOT_LEFT,
   ROBOT_RIGHT,
+  ROBOT_ROTATE_LEFT,
+  ROBOT_ROTATE_RIGHT,
   ROBOT_ALARM
 };
 
@@ -155,6 +157,24 @@ void moveRight(int pwm) {
   MOTORC_BACKOFF(p);
   MOTORB_FORWARD(p);
   MOTORD_BACKOFF(p + 10);
+}
+
+void rotateLeft(int pwm) {
+  int p = clampPwm(pwm);
+  // 与你提供的 rotate_1 方向一致：四轮 BACKOFF
+  MOTORA_BACKOFF(p);
+  MOTORB_BACKOFF(p);
+  MOTORC_BACKOFF(p);
+  MOTORD_BACKOFF(p);
+}
+
+void rotateRight(int pwm) {
+  int p = clampPwm(pwm);
+  // 与你提供的 rotate_2 方向一致：四轮 FORWARD
+  MOTORA_FORWARD(p);
+  MOTORB_FORWARD(p);
+  MOTORC_FORWARD(p);
+  MOTORD_FORWARD(p);
 }
 
 // ====================================================================
@@ -298,6 +318,14 @@ void applyRobotState(RobotState state) {
       moveRight(SIDE_PWM);
       break;
 
+    case ROBOT_ROTATE_LEFT:
+      rotateLeft(SIDE_PWM);
+      break;
+
+    case ROBOT_ROTATE_RIGHT:
+      rotateRight(SIDE_PWM);
+      break;
+
     case ROBOT_ALARM:
       stopAllMotors();
       break;
@@ -308,57 +336,89 @@ void applyRobotState(RobotState state) {
 // 模块11：串口命令解析
 // ====================================================================
 
-void executeCommand(char cmd) {
-  lastCmd = cmd;
+void executeCommand(const String& cmd) {
+  if (cmd.length() == 0) return;
+  lastCmd = cmd[0];
   lastCommandTimeMs = millis();
 
-  switch (cmd) {
-    case 'F':
+  if (cmd == "F") {
       alarmActive = false;
       if (isFrontObstacle()) {
         applyRobotState(ROBOT_STOP);
       } else {
         applyRobotState(ROBOT_FORWARD);
       }
-      break;
+      return;
+  }
 
-    case 'B':
+  if (cmd == "B") {
       alarmActive = false;
       applyRobotState(ROBOT_BACKWARD);
-      break;
+      return;
+  }
 
-    case 'L':
+  if (cmd == "L") {
       alarmActive = false;
       applyRobotState(ROBOT_LEFT);
-      break;
+      return;
+  }
 
-    case 'R':
+  if (cmd == "R") {
       alarmActive = false;
       applyRobotState(ROBOT_RIGHT);
-      break;
+      return;
+  }
 
-    case 'S':
+  if (cmd == "LL") {
+      alarmActive = false;
+      applyRobotState(ROBOT_ROTATE_LEFT);
+      return;
+  }
+
+  if (cmd == "RR") {
+      alarmActive = false;
+      applyRobotState(ROBOT_ROTATE_RIGHT);
+      return;
+  }
+
+  if (cmd == "S") {
       alarmActive = false;
       applyRobotState(ROBOT_STOP);
-      break;
+      return;
+  }
 
-    case 'A':
+  if (cmd == "A") {
       applyRobotState(ROBOT_ALARM);
       alarmActive = true;
-      break;
-
-    default:
-      alarmActive = false;
-      applyRobotState(ROBOT_STOP);
-      break;
+      return;
   }
+
+  alarmActive = false;
+  applyRobotState(ROBOT_STOP);
 }
 
 void readJetsonCommand() {
+  static String token = "";
   while (Serial.available() > 0) {
     char c = Serial.read();
-    if (c == '\n' || c == '\r' || c == ' ') continue;
-    executeCommand(c);
+    if (c == '\n' || c == '\r' || c == ' ') {
+      if (token.length() > 0) {
+        executeCommand(token);
+        token = "";
+      }
+      continue;
+    }
+
+    token += c;
+    // 兼容旧协议：单字符命令到达即执行
+    if (token == "F" || token == "B" || token == "L" || token == "R" || token == "S" || token == "A") {
+      executeCommand(token);
+      token = "";
+    } else if (token.length() >= 2) {
+      // 双字符命令：RR / LL
+      executeCommand(token);
+      token = "";
+    }
   }
 }
 
@@ -389,6 +449,8 @@ const char* stateToString(RobotState state) {
     case ROBOT_BACKWARD: return "BACKWARD";
     case ROBOT_LEFT: return "LEFT";
     case ROBOT_RIGHT: return "RIGHT";
+    case ROBOT_ROTATE_LEFT: return "ROT_L";
+    case ROBOT_ROTATE_RIGHT: return "ROT_R";
     case ROBOT_ALARM: return "ALARM";
     default: return "UNKNOWN";
   }

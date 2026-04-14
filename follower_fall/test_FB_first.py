@@ -37,6 +37,7 @@ VISIBILITY_THRESHOLD = 0.5
 
 # 跟随控制阈值
 TURN_THRESHOLD_PX = 70
+ALIGN_DONE_THRESHOLD_PX = 20
 FORWARD_HEIGHT_THRESHOLD = 360
 STOP_HEIGHT_THRESHOLD = 420
 FAR_FORWARD_X_TOLERANCE_PX = 120
@@ -325,14 +326,14 @@ class FollowController:
             # 左右对齐阶段：一旦触发，就持续左右移动直到回到中心
             if self.lr_align_active:
                 if error_x < -TURN_THRESHOLD_PX:
-                    cmd = "L"
+                    cmd = "LL"
                     reason = (
-                        f"lr_align_active(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> keep L"
+                        f"lr_align_active(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> keep LL"
                     )
                 elif error_x > TURN_THRESHOLD_PX:
-                    cmd = "R"
+                    cmd = "RR"
                     reason = (
-                        f"lr_align_active(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> keep R"
+                        f"lr_align_active(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> keep RR"
                     )
                 else:
                     self.lr_align_active = False
@@ -352,15 +353,15 @@ class FollowController:
                 self.fb_pulse_end_time = 0.0
                 if error_x < -TURN_THRESHOLD_PX:
                     self.lr_align_active = True
-                    cmd = "L"
+                    cmd = "LL"
                     reason = (
-                        f"after_1s_fb_check_center(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> start L-align"
+                        f"after_1s_fb_check_center(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> start LL-align"
                     )
                 elif error_x > TURN_THRESHOLD_PX:
                     self.lr_align_active = True
-                    cmd = "R"
+                    cmd = "RR"
                     reason = (
-                        f"after_1s_fb_check_center(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> start R-align"
+                        f"after_1s_fb_check_center(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> start RR-align"
                     )
                 else:
                     cmd = "S"
