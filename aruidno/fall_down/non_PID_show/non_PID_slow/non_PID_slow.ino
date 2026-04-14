@@ -45,8 +45,9 @@ Adafruit_SSD1306 oledDisplay(OLED_SCREEN_WIDTH, OLED_SCREEN_HEIGHT, &Wire, OLED_
 // PWM 设置
 const int PWM_MIN = 0;
 const int PWM_MAX = 255;
-const int  BASE_PWM = 40;
+const int  BASE_PWM = 60;
 const int SIDE_PWM = 40;
+const int ROTATE_PWM = 90;
 
 // 避障阈值
 const int FRONT_OBSTACLE_CM = 4;
@@ -160,7 +161,7 @@ void moveRight(int pwm) {
 }
 
 void rotateLeft(int pwm) {
-  int p = clampPwm(pwm-20);
+  int p = clampPwm(pwm-10);
   // 与你提供的 rotate_1 方向一致：四轮 BACKOFF
   MOTORA_BACKOFF(p);
   MOTORB_BACKOFF(p);
@@ -169,7 +170,7 @@ void rotateLeft(int pwm) {
 }
 
 void rotateRight(int pwm) {
-  int p = clampPwm(pwm-20);
+  int p = clampPwm(pwm-10);
   // 与你提供的 rotate_2 方向一致：四轮 FORWARD
   MOTORA_FORWARD(p);
   MOTORB_FORWARD(p);
@@ -319,11 +320,11 @@ void applyRobotState(RobotState state) {
       break;
 
     case ROBOT_ROTATE_LEFT:
-      rotateLeft(SIDE_PWM);
+      rotateLeft(ROTATE_PWM);
       break;
 
     case ROBOT_ROTATE_RIGHT:
-      rotateRight(SIDE_PWM);
+      rotateRight(ROTATE_PWM);
       break;
 
     case ROBOT_ALARM:
