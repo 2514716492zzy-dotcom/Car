@@ -408,17 +408,7 @@ void readJetsonCommand() {
       }
       continue;
     }
-
     token += c;
-    // 兼容旧协议：单字符命令到达即执行
-    if (token == "F" || token == "B" || token == "L" || token == "R" || token == "S" || token == "A") {
-      executeCommand(token);
-      token = "";
-    } else if (token.length() >= 2) {
-      // 双字符命令：RR / LL
-      executeCommand(token);
-      token = "";
-    }
   }
 }
 

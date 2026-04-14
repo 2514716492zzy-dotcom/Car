@@ -317,7 +317,7 @@ class FollowController:
             self.fb_pulse_cmd = None
             self.fb_pulse_end_time = 0.0
             self.lr_align_active = False
-            cmd = "S"
+            cmd = "S\n"
             reason = (
                 f"distance_reached({FORWARD_HEIGHT_THRESHOLD} <= body_height={body_height:.1f} < "
                 f"{STOP_HEIGHT_THRESHOLD}) -> stop follow"
@@ -326,18 +326,18 @@ class FollowController:
             # 左右对齐阶段：一旦触发，就持续左右移动直到回到中心
             if self.lr_align_active:
                 if error_x < -TURN_THRESHOLD_PX:
-                    cmd = "LL"
+                    cmd = "LL\n"
                     reason = (
                         f"lr_align_active(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> keep LL"
                     )
                 elif error_x > TURN_THRESHOLD_PX:
-                    cmd = "RR"
+                    cmd = "RR\n"
                     reason = (
                         f"lr_align_active(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> keep RR"
                     )
                 else:
                     self.lr_align_active = False
-                    cmd = "S"
+                    cmd = "S\n"
                     reason = (
                         f"lr_align_done(|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}) -> S"
                     )
@@ -353,18 +353,18 @@ class FollowController:
                 self.fb_pulse_end_time = 0.0
                 if error_x < -TURN_THRESHOLD_PX:
                     self.lr_align_active = True
-                    cmd = "LL"
+                    cmd = "LL\n"
                     reason = (
                         f"after_1s_fb_check_center(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> start LL-align"
                     )
                 elif error_x > TURN_THRESHOLD_PX:
                     self.lr_align_active = True
-                    cmd = "RR"
+                    cmd = "RR\n"
                     reason = (
                         f"after_1s_fb_check_center(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> start RR-align"
                     )
                 else:
-                    cmd = "S"
+                    cmd = "S\n"
                     reason = (
                         f"after_1s_fb_check_center(|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}) -> S"
                     )
@@ -373,15 +373,15 @@ class FollowController:
                 if body_height < FORWARD_HEIGHT_THRESHOLD:
                     self.fb_pulse_cmd = "F"
                     self.fb_pulse_end_time = now + FB_PULSE_SEC
-                    cmd = "F"
+                    cmd = "F\n"
                     reason = (
                         f"too_far(body_height={body_height:.1f} < {FORWARD_HEIGHT_THRESHOLD}) "
                         f"-> F for {FB_PULSE_SEC:.1f}s"
                     )
                 else:
-                    self.fb_pulse_cmd = "B"
+                    self.fb_pulse_cmd = "B\n"
                     self.fb_pulse_end_time = now + FB_PULSE_SEC
-                    cmd = "B"
+                    cmd = "B\n"
                     reason = (
                         f"too_close(body_height={body_height:.1f} >= {STOP_HEIGHT_THRESHOLD}) "
                         f"-> B for {FB_PULSE_SEC:.1f}s"
@@ -590,7 +590,7 @@ def main():
 
                 last_debug_print_time = now
 
-            cmd = "S"
+            cmd = "S\n"
             orientation = "unknown"
             follow_info = None
             fall_info = None
@@ -617,20 +617,20 @@ def main():
 
                     # 跌倒优先级 > 跟随
                     if fall_info["state"] == STATE_ALARM:
-                        cmd = "A"
+                        cmd = "A\n"
                     elif fall_info["state"] in [STATE_FALLING, STATE_LYING]:
-                        cmd = "S"
+                        cmd = "S\n"
                     else:
                         follow_info = follower.get_follow_command(shoulder_mid, hip_mid, ankle_mid)
                         cmd = follow_info["cmd"]
                         if DEBUG_PRINT:
                             print(f"[FOLLOW] cmd={cmd} reason={follow_info['reason']}")
                 else:
-                    cmd = "S"
+                    cmd = "S\n"
                     if DEBUG_PRINT:
                         print("[FOLLOW] cmd=S reason=missing_valid_pairs(shoulder/hip/ankle visibility)")
             else:
-                cmd = "S"
+                cmd = "S\n"
                 if DEBUG_PRINT:
                     print("[FOLLOW] cmd=S reason=no_pose_detected")
 
@@ -672,12 +672,12 @@ def main():
                     fall_detector.reset()
                     print("[INFO] Fall detector reset")
                 elif key == ord('s'):
-                    commander.send("S", force=True)
+                    commander.send("S\n", force=True)
                 elif key == ord('a'):
-                    commander.send("A", force=True)
+                    commander.send("A\n", force=True)
 
     finally:
-        commander.send("S", force=True)
+        commander.send("S\n", force=True)
         commander.close()
         cap.release()
         cv2.destroyAllWindows()
