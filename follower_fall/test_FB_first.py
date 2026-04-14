@@ -330,7 +330,13 @@ class FollowController:
             pulse_reason_prefix = ""
             # 左右对齐阶段：一旦触发，就持续左右移动直到回到中心
             if self.lr_align_active:
-                if need_left_align:
+                if abs(error_x) <= ALIGN_DONE_THRESHOLD_PX:
+                    self.lr_align_active = False
+                    cmd = "S\n"
+                    reason = (
+                        f"lr_align_done(|error_x|={abs(error_x):.1f} <= {ALIGN_DONE_THRESHOLD_PX}) -> S"
+                    )
+                elif need_left_align:
                     cmd = "LL\n"
                     reason = (
                         f"lr_align_active(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> keep LL"
@@ -341,10 +347,10 @@ class FollowController:
                         f"lr_align_active(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> keep RR"
                     )
                 else:
-                    self.lr_align_active = False
+                    # 介于退出阈值和触发阈值之间时，先停一下，避免惯性过冲
                     cmd = "S\n"
                     reason = (
-                        f"lr_align_done(|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}) -> S"
+                        f"lr_align_brake({ALIGN_DONE_THRESHOLD_PX} < |error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}) -> S"
                     )
             # 前后脉冲阶段：每次 F/B 只执行 1s
             elif self.fb_pulse_cmd is not None and now < self.fb_pulse_end_time:
