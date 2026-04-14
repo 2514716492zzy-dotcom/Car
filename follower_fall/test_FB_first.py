@@ -42,6 +42,7 @@ FORWARD_HEIGHT_THRESHOLD = 360
 STOP_HEIGHT_THRESHOLD = 420
 FAR_FORWARD_X_TOLERANCE_PX = 120
 FB_PULSE_SEC = 1.0
+LR_ALIGN_PULSE_SEC = 0.2
 
 # 连续发命令节流
 MIN_CMD_INTERVAL = 0.10
@@ -256,6 +257,8 @@ class FollowController:
         self.fb_pulse_cmd = None
         self.fb_pulse_end_time = 0.0
         self.lr_align_active = False
+        self.lr_pulse_cmd = None
+        self.lr_pulse_end_time = 0.0
 
     def get_body_points(self, keypoints):
         ls = keypoints["left_shoulder"]
@@ -317,6 +320,8 @@ class FollowController:
             self.fb_pulse_cmd = None
             self.fb_pulse_end_time = 0.0
             self.lr_align_active = False
+            self.lr_pulse_cmd = None
+            self.lr_pulse_end_time = 0.0
             cmd = "S\n"
             reason = (
                 f"distance_reached({FORWARD_HEIGHT_THRESHOLD} <= body_height={body_height:.1f} < "
@@ -325,22 +330,36 @@ class FollowController:
         else:
             # 左右对齐阶段：一旦触发，就持续左右移动直到回到中心
             if self.lr_align_active:
-                if error_x < -TURN_THRESHOLD_PX:
-                    cmd = "LL\n"
+                if self.lr_pulse_cmd is not None and now < self.lr_pulse_end_time:
+                    cmd = self.lr_pulse_cmd
                     reason = (
-                        f"lr_align_active(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> keep LL"
-                    )
-                elif error_x > TURN_THRESHOLD_PX:
-                    cmd = "RR\n"
-                    reason = (
-                        f"lr_align_active(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> keep RR"
+                        f"lr_align_pulse_active(cmd={cmd.strip()}, remain={self.lr_pulse_end_time - now:.2f}s)"
                     )
                 else:
-                    self.lr_align_active = False
-                    cmd = "S\n"
-                    reason = (
-                        f"lr_align_done(|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}) -> S"
-                    )
+                    if abs(error_x) <= TURN_THRESHOLD_PX:
+                        self.lr_align_active = False
+                        self.lr_pulse_cmd = None
+                        self.lr_pulse_end_time = 0.0
+                        cmd = "S\n"
+                        reason = (
+                            f"lr_align_done(|error_x|={abs(error_x):.1f} <= {TURN_THRESHOLD_PX}) -> S"
+                        )
+                    elif error_x < -TURN_THRESHOLD_PX:
+                        self.lr_pulse_cmd = "LL\n"
+                        self.lr_pulse_end_time = now + LR_ALIGN_PULSE_SEC
+                        cmd = "LL\n"
+                        reason = (
+                            f"lr_align_pulse_start(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) "
+                            f"-> LL for {LR_ALIGN_PULSE_SEC:.1f}s"
+                        )
+                    else:
+                        self.lr_pulse_cmd = "RR\n"
+                        self.lr_pulse_end_time = now + LR_ALIGN_PULSE_SEC
+                        cmd = "RR\n"
+                        reason = (
+                            f"lr_align_pulse_start(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) "
+                            f"-> RR for {LR_ALIGN_PULSE_SEC:.1f}s"
+                        )
             # 前后脉冲阶段：每次 F/B 只执行 1s
             elif self.fb_pulse_cmd is not None and now < self.fb_pulse_end_time:
                 cmd = self.fb_pulse_cmd
@@ -353,15 +372,21 @@ class FollowController:
                 self.fb_pulse_end_time = 0.0
                 if error_x < -TURN_THRESHOLD_PX:
                     self.lr_align_active = True
+                    self.lr_pulse_cmd = "LL\n"
+                    self.lr_pulse_end_time = now + LR_ALIGN_PULSE_SEC
                     cmd = "LL\n"
                     reason = (
-                        f"after_1s_fb_check_center(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) -> start LL-align"
+                        f"after_1s_fb_check_center(error_x={error_x:.1f} < -{TURN_THRESHOLD_PX}) "
+                        f"-> start LL-align pulse {LR_ALIGN_PULSE_SEC:.1f}s"
                     )
                 elif error_x > TURN_THRESHOLD_PX:
                     self.lr_align_active = True
+                    self.lr_pulse_cmd = "RR\n"
+                    self.lr_pulse_end_time = now + LR_ALIGN_PULSE_SEC
                     cmd = "RR\n"
                     reason = (
-                        f"after_1s_fb_check_center(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) -> start RR-align"
+                        f"after_1s_fb_check_center(error_x={error_x:.1f} > {TURN_THRESHOLD_PX}) "
+                        f"-> start RR-align pulse {LR_ALIGN_PULSE_SEC:.1f}s"
                     )
                 else:
                     cmd = "S\n"
