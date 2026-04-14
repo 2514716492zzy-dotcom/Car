@@ -319,11 +319,11 @@ void applyRobotState(RobotState state) {
       break;
 
     case ROBOT_ROTATE_LEFT:
-      rotateLeft(SIDE_PWM);
+      rotateLeft(SIDE_PWM + 50);
       break;
 
     case ROBOT_ROTATE_RIGHT:
-      rotateRight(SIDE_PWM);
+      rotateRight(SIDE_PWM + 50);
       break;
 
     case ROBOT_ALARM:
