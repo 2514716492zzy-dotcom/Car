@@ -8,7 +8,7 @@ Required environment variables:
                    API key for Qwen/OpenAI-compatible chat endpoint.
 
 Optional environment variables:
-  OPENAI_BASE_URL  Default: https://dashscope.aliyuncs.com/compatible-mode/v1
+  OPENAI_BASE_URL  Default: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
   OPENAI_MODEL     Default: qwen-plus
 """
 
@@ -289,7 +289,7 @@ def main() -> int:
         print("ERROR: DASHSCOPE_API_KEY (or OPENAI_API_KEY) is not set.")
         return 1
 
-    base_url = os.getenv("OPENAI_BASE_URL", " https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+    base_url = os.getenv("OPENAI_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
 
     # Normalize model name to lowercase to avoid case-related API errors.
     model = os.getenv("OPENAI_MODEL", "Qwen-Plus").strip()
