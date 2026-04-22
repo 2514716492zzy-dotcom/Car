@@ -8,3 +8,4 @@ python3 -X faulthandler -c "import mediapipe as mp; print('mediapipe ok')"
 python3 -X faulthandler -c "import serial; print('serial ok')"
 # 用您的阿里云百炼API Key代替YOUR_DASHSCOPE_API_KEY
 echo "export DASHSCOPE_API_KEY=sk-494791b2574b449b99dec440129f1f89" >> ~/.bashrc
+echo "export DASHSCOPE_API_KEY=sk-3bcf07c5322e48459679518a98acca46" >> ~/.bashrc
