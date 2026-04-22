@@ -166,24 +166,58 @@ def create_microphone_and_recognizer(
     """
     recognizer = sr.Recognizer()
     selected_index = mic_index
+    input_capable_indices = set()
+
+    try:
+        mic_names = sr.Microphone.list_microphone_names()
+    except Exception as exc:
+        print(f"[Mic] Failed to list devices: {exc}")
+        mic_names = []
+
+    # Use PyAudio metadata to keep only devices that actually support input.
+    try:
+        import pyaudio
+
+        pa = pyaudio.PyAudio()
+        try:
+            for i, name in enumerate(mic_names):
+                max_input = 0
+                try:
+                    info = pa.get_device_info_by_index(i)
+                    max_input = int(info.get("maxInputChannels", 0))
+                except Exception:
+                    max_input = 0
+
+                if max_input > 0:
+                    input_capable_indices.add(i)
+                print(f"[Mic] Device {i}: {name} (input_channels={max_input})")
+        finally:
+            pa.terminate()
+    except Exception:
+        print("[Mic] PyAudio device metadata unavailable; falling back to raw device list")
+        for i, name in enumerate(mic_names):
+            print(f"[Mic] Device {i}: {name}")
+        input_capable_indices = set(range(len(mic_names)))
+
+    if selected_index is not None and selected_index not in input_capable_indices:
+        print(f"[Mic] Requested device index {selected_index} is not input-capable; ignoring it")
+        selected_index = None
 
     if selected_index is None:
-        try:
-            mic_names = sr.Microphone.list_microphone_names()
-            print("[Mic] Available devices:")
-            for i, name in enumerate(mic_names):
-                print(f"  {i}: {name}")
-                if selected_index is None and preferred_mic_keyword.lower() in name.lower():
-                    selected_index = i
+        preferred = preferred_mic_keyword.lower()
+        for i, name in enumerate(mic_names):
+            if i in input_capable_indices and preferred in name.lower():
+                selected_index = i
+                break
 
-            # Extra fallback match used by your existing project.
-            if selected_index is None:
-                for i, name in enumerate(mic_names):
-                    if ("usb audio" in name.lower()) or ("yundea" in name.lower()):
-                        selected_index = i
-                        break
-        except Exception as exc:
-            print(f"[Mic] Failed to list devices: {exc}")
+    if selected_index is None:
+        for i, name in enumerate(mic_names):
+            lowered = name.lower()
+            if i in input_capable_indices and (
+                "yundea" in lowered or "usb audio" in lowered or "camera" in lowered
+            ):
+                selected_index = i
+                break
 
     if selected_index is not None:
         print(f"[Mic] Using device index {selected_index}")
@@ -215,7 +249,6 @@ def listen_english_text(
     recognizer.non_speaking_duration = min(end_silence_seconds, 1.0)
     with mic as source:
         print("\n[Mic] Listening... Please speak English.")
-        recognizer.adjust_for_ambient_noise(source, duration=0.8)
         audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_limit)
 
     text = recognizer.recognize_google(audio, language="en-US").strip()
