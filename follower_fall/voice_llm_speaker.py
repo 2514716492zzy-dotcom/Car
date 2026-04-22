@@ -257,6 +257,16 @@ def prepare_tts_text(text: str, max_chars: int = 180) -> str:
     return cleaned or "Woof!"
 
 
+def is_follow_stopped(state_file: str) -> bool:
+    """Return True only when follow state file says STOPPED."""
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            return f.read().strip().upper() == "STOPPED"
+    except Exception:
+        # If state file is missing, do not block voice flow.
+        return True
+
+
 def speak_english(
     text: str,
     lang: str = "en",
@@ -374,6 +384,11 @@ def main() -> int:
         default=180,
         help="Maximum characters spoken per reply to speed up TTS",
     )
+    parser.add_argument(
+        "--follow-state-file",
+        default="/tmp/follow_motion_state.txt",
+        help="Path of follow state file; listen only when value is STOPPED",
+    )
     args = parser.parse_args()
     if args.linux_speaker_device is None and sys.platform.startswith("linux"):
         # Jetson fallback: use known-working USB audio playback device by default.
@@ -402,8 +417,19 @@ def main() -> int:
         print(f"Linux speaker device: {args.linux_speaker_device}")
     print("Press Ctrl+C to stop.\n")
 
+    waiting_follow_logged = False
     while True:
         try:
+            if not is_follow_stopped(args.follow_state_file):
+                if not waiting_follow_logged:
+                    print("[Mic] Follow is moving. Waiting for STOPPED state before listening...")
+                    waiting_follow_logged = True
+                time.sleep(0.3)
+                continue
+            if waiting_follow_logged:
+                print("[Mic] Follow stopped. Voice listening resumed.")
+                waiting_follow_logged = False
+
             user_text = listen_english_text(
                 recognizer=recognizer,
                 mic=mic,

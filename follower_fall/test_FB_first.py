@@ -32,6 +32,7 @@ ENABLE_FALL_DETECTION = True
 SERIAL_PORT = '/dev/ttyUSB0'   # 按实际修改
 BAUD_RATE = 115200
 SERIAL_ENABLED = True # 调试模式：仅打印命令，不与 Arduino 串口通信
+FOLLOW_STATE_FILE = "/tmp/follow_motion_state.txt"
 
 # 关键点可见度阈值
 VISIBILITY_THRESHOLD = 0.5
@@ -166,6 +167,17 @@ class SerialCommander:
                 print(f"[WARN] Serial write failed: {e}")
 
         print(f"[CMD] {cmd}")
+        self._write_follow_state(cmd)
+
+    @staticmethod
+    def _write_follow_state(cmd):
+        state = "STOPPED" if cmd.strip() == "S" else "MOVING"
+        try:
+            with open(FOLLOW_STATE_FILE, "w", encoding="utf-8") as f:
+                f.write(state)
+        except Exception:
+            pass
+
 
     def close(self):
         if self.ser:
@@ -559,6 +571,12 @@ def format_kp(name, kp):
 # 主程序
 # =========================================================
 def main():
+    try:
+        with open(FOLLOW_STATE_FILE, "w", encoding="utf-8") as f:
+            f.write("STOPPED")
+    except Exception:
+        pass
+
     if WEB_PREVIEW and not FLASK_AVAILABLE:
         print("[WARN] WEB_PREVIEW=True but Flask is not installed. Disable web preview.")
 
