@@ -4,11 +4,12 @@ English voice assistant pipeline:
 Microphone -> Speech Recognition (EN) -> LLM API -> English TTS playback.
 
 Required environment variables:
-  OPENAI_API_KEY   Your API key for OpenAI-compatible chat endpoint.
+  DASHSCOPE_API_KEY or OPENAI_API_KEY
+                   API key for Qwen/OpenAI-compatible chat endpoint.
 
 Optional environment variables:
-  OPENAI_BASE_URL  Default: https://api.openai.com/v1
-  OPENAI_MODEL     Default: gpt-4o-mini
+  OPENAI_BASE_URL  Default: https://dashscope.aliyuncs.com/compatible-mode/v1
+  OPENAI_MODEL     Default: qwen-plus
 """
 
 import argparse
@@ -211,13 +212,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("DASHSCOPE_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("ERROR: OPENAI_API_KEY is not set.")
+        print("ERROR: DASHSCOPE_API_KEY (or OPENAI_API_KEY) is not set.")
         return 1
 
-    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    model = os.getenv("OPENAI_MODEL", "qwen-plus")
 
     recognizer, mic = create_microphone_and_recognizer(
         mic_index=args.mic_index,

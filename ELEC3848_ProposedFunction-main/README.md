@@ -149,3 +149,7 @@ If you want I can:
 ---
 
 README created by automation. If you'd like wording or content changes, tell me what to adjust.
+
+
+# 用您的阿里云百炼API Key代替YOUR_DASHSCOPE_API_KEY
+echo "export DASHSCOPE_API_KEY=sk-494791b2574b449b99dec440129f1f89" >> ~/.bashrc
