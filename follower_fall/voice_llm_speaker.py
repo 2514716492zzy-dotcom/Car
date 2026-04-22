@@ -26,6 +26,12 @@ import speech_recognition as sr
 from gtts import gTTS
 
 WAKE_WORD = "hello doggie"
+DEFAULT_WAKE_ALIASES = (
+    "hello",
+    "hello doggie",
+    "hello doggy",
+)
+FUZZY_DOG_TOKENS = ("dog", "doggy", "doggie")
 
 
 def normalize_for_match(text: str) -> str:
@@ -33,6 +39,72 @@ def normalize_for_match(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     return " ".join(text.split())
+
+
+def edit_distance(a: str, b: str) -> int:
+    """Compute Levenshtein distance for short wake-word tokens."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        curr = [i]
+        for j, cb in enumerate(b, start=1):
+            cost = 0 if ca == cb else 1
+            curr.append(min(
+                prev[j] + 1,       # deletion
+                curr[j - 1] + 1,   # insertion
+                prev[j - 1] + cost # substitution
+            ))
+        prev = curr
+    return prev[-1]
+
+
+def has_fuzzy_dog_token(normalized_text: str) -> bool:
+    """
+    Allow minor misspellings near dog/doggy/doggie in first clause.
+    Examples: dogy, dogi, doogie, daggy (distance <= 1~2 by length).
+    """
+    for token in normalized_text.split():
+        # Keep token check focused and cheap.
+        if len(token) < 3 or len(token) > 10:
+            continue
+        if token.startswith("dog"):
+            return True
+        for target in FUZZY_DOG_TOKENS:
+            max_dist = 1 if len(target) <= 4 else 2
+            if abs(len(token) - len(target)) <= max_dist and edit_distance(token, target) <= max_dist:
+                return True
+    return False
+
+
+def wake_detected(text: str, user_wake_word: str) -> tuple[bool, str]:
+    """
+    Robust wake-word detection.
+
+    Accepts:
+    - User-provided wake word via --wake-word
+    - Built-in aliases: hello / hello doggie / hello doggy
+    """
+    # Only inspect the first sentence/clause for wake-word intent.
+    first_clause = re.split(r"[.!?,;:\n]", text, maxsplit=1)[0]
+    normalized_text = normalize_for_match(first_clause)
+    candidates = {normalize_for_match(user_wake_word)}
+    candidates.update(normalize_for_match(w) for w in DEFAULT_WAKE_ALIASES)
+
+    # Extra-robust rule requested: any dog-like token in first clause triggers wake.
+    # Examples: dog / doggy / doggie + near misspellings (dogy, dogi, doogie).
+    if has_fuzzy_dog_token(normalized_text):
+        return True, "dog"
+
+    for wake in candidates:
+        if wake and wake in normalized_text:
+            return True, wake
+    return False, ""
 
 
 def create_microphone_and_recognizer(
@@ -249,15 +321,18 @@ def main() -> int:
 
             print(f"[You] {user_text}")
             normalized_text = normalize_for_match(user_text)
-            normalized_wake_word = normalize_for_match(args.wake_word)
-            if normalized_wake_word not in normalized_text:
-                print(f"[Wake] Not detected. Say '{args.wake_word}' to activate.")
+            is_woken, matched_wake = wake_detected(user_text, args.wake_word)
+            if not is_woken:
+                print(
+                    f"[Wake] Not detected. Say '{args.wake_word}' "
+                    "(also accepts: hello / hello doggie / hello doggy)."
+                )
                 if args.once:
                     break
                 continue
 
-            # Remove wake word from prompt text if present, keep the rest as user query.
-            cleaned_text = normalized_text.replace(normalized_wake_word, "", 1).strip()
+            # Remove matched wake phrase from prompt text if present.
+            cleaned_text = normalized_text.replace(matched_wake, "", 1).strip()
             if not cleaned_text:
                 cleaned_text = "Please introduce yourself briefly."
 
