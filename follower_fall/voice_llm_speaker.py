@@ -289,8 +289,10 @@ def main() -> int:
         print("ERROR: DASHSCOPE_API_KEY (or OPENAI_API_KEY) is not set.")
         return 1
 
-    base_url = os.getenv("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    model = os.getenv("OPENAI_MODEL", "qwen-plus")
+    base_url = os.getenv("OPENAI_BASE_URL", " https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+
+    # Normalize model name to lowercase to avoid case-related API errors.
+    model = os.getenv("OPENAI_MODEL", "Qwen-Plus").strip()
 
     recognizer, mic = create_microphone_and_recognizer(
         mic_index=args.mic_index,
