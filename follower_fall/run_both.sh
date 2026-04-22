@@ -15,6 +15,7 @@ FOLLOW_LOG="$LOG_DIR/follow.log"
 VOICE_LOG="$LOG_DIR/voice.log"
 
 CONDA_ENV="${1:-car_detector}"
+MIC_INDEX="${MIC_INDEX:-}"
 
 if ! command -v conda >/dev/null 2>&1; then
   echo "[ERROR] conda command not found in PATH."
@@ -22,6 +23,13 @@ if ! command -v conda >/dev/null 2>&1; then
 fi
 
 echo "[INFO] Using conda env: $CONDA_ENV"
+if [[ -n "$MIC_INDEX" ]]; then
+  echo "[INFO] Using fixed mic index: $MIC_INDEX"
+  VOICE_MIC_ARGS=(--mic-index "$MIC_INDEX")
+else
+  echo "[INFO] Mic index not set; using auto-detection"
+  VOICE_MIC_ARGS=()
+fi
 
 echo "[INFO] Starting follow script..."
 conda run --no-capture-output -n "$CONDA_ENV" \
@@ -35,7 +43,9 @@ echo "[INFO] Starting voice script..."
 conda run --no-capture-output -n "$CONDA_ENV" \
   python3 "$ROOT_DIR/voice_llm_speaker.py" \
   --player mpg123 \
-  --linux-speaker-device hw:2,0 2>&1 \
+  --linux-speaker-device hw:2,0 \
+  --mic-keyword Yundea \
+  "${VOICE_MIC_ARGS[@]}" 2>&1 \
   | stdbuf -oL awk '{print "[SPEAK] " $0; fflush();}' \
   | tee -a "$VOICE_LOG" &
 VOICE_PID=$!

@@ -219,19 +219,41 @@ def create_microphone_and_recognizer(
                 selected_index = i
                 break
 
-    if selected_index is not None:
-        print(f"[Mic] Using device index {selected_index}")
-        mic = sr.Microphone(device_index=selected_index, sample_rate=sample_rate)
-    else:
-        print("[Mic] Using system default microphone")
-        mic = sr.Microphone(sample_rate=sample_rate)
+    sample_rate_candidates = []
+    for sr_candidate in (sample_rate, 44100, 48000, 16000):
+        if sr_candidate not in sample_rate_candidates:
+            sample_rate_candidates.append(sr_candidate)
 
-    try:
-        with mic as source:
-            print("[Mic] Calibrating ambient noise (1s)...")
-            recognizer.adjust_for_ambient_noise(source, duration=1.0)
-    except Exception:
-        pass
+    def _build_and_probe(idx: Optional[int], sr_hz: int) -> Optional[sr.Microphone]:
+        try:
+            m = sr.Microphone(device_index=idx, sample_rate=sr_hz)
+            with m as source:
+                recognizer.adjust_for_ambient_noise(source, duration=0.4)
+            return m
+        except Exception as exc:
+            label = "default" if idx is None else str(idx)
+            print(f"[Mic] Probe failed for device={label}, sample_rate={sr_hz}: {exc}")
+            return None
+
+    mic = None
+    if selected_index is not None:
+        print(f"[Mic] Trying selected device index {selected_index}")
+        for sr_hz in sample_rate_candidates:
+            mic = _build_and_probe(selected_index, sr_hz)
+            if mic is not None:
+                print(f"[Mic] Using device index {selected_index} @ {sr_hz} Hz")
+                break
+
+    if mic is None:
+        print("[Mic] Falling back to system default microphone")
+        for sr_hz in sample_rate_candidates:
+            mic = _build_and_probe(None, sr_hz)
+            if mic is not None:
+                print(f"[Mic] Using default device @ {sr_hz} Hz")
+                break
+
+    if mic is None:
+        raise RuntimeError("No usable microphone device found after probing sample rates.")
 
     return recognizer, mic
 
@@ -397,7 +419,7 @@ def main() -> int:
     parser.add_argument("--mic-index", type=int, default=None, help="Microphone device index")
     parser.add_argument(
         "--mic-keyword",
-        default="USB Audio",
+        default="Yundea",
         help="Preferred keyword to auto-select external microphone",
     )
     parser.add_argument(
@@ -518,6 +540,17 @@ def main() -> int:
                 break
         except sr.UnknownValueError:
             print("[ASR] Could not recognize speech clearly. Please try again.")
+            if args.once:
+                break
+        except AttributeError as exc:
+            if "close" in str(exc):
+                print(f"[Mic] Stream cleanup issue detected ({exc}); reinitializing microphone...")
+                recognizer, mic = create_microphone_and_recognizer(
+                    mic_index=args.mic_index,
+                    preferred_mic_keyword=args.mic_keyword,
+                )
+                continue
+            print(f"[Error] {exc}")
             if args.once:
                 break
         except requests.HTTPError as exc:

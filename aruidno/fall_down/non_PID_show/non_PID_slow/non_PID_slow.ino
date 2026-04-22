@@ -50,13 +50,14 @@ const int SIDE_PWM = 40;
 const int ROTATE_PWM = 65;
 
 // 避障阈值
-const int FRONT_OBSTACLE_CM = 4;
+const int FRONT_OBSTACLE_CM = 6;
 
 // 周期参数
 const unsigned long SONAR_READ_INTERVAL_MS = 120UL;
 const unsigned long OLED_REFRESH_INTERVAL_MS = 250UL;
 const unsigned long ALARM_BLINK_INTERVAL_MS = 300UL;
 const unsigned long COMMAND_TIMEOUT_MS = 800UL;
+const unsigned long EMERGENCY_OLED_BLINK_INTERVAL_MS = 120UL;
 
 // ====================================================================
 // 模块3：枚举和全局变量
@@ -83,6 +84,9 @@ unsigned long lastCommandTimeMs = 0;
 bool alarmActive = false;
 bool alarmToggleState = false;
 unsigned long lastAlarmBlinkMs = 0;
+bool emergencyObstacleActive = false;
+bool emergencyOledBlinkOn = false;
+unsigned long lastEmergencyOledBlinkMs = 0;
 
 // 超声波测距结果
 long frontLeftDistCm = -1;
@@ -268,6 +272,12 @@ bool isFrontObstacle() {
   return false;
 }
 
+void triggerEmergencyObstacle() {
+  emergencyObstacleActive = true;
+  emergencyOledBlinkOn = true;
+  lastEmergencyOledBlinkMs = millis();
+}
+
 // ====================================================================
 // 模块9：报警控制
 // ====================================================================
@@ -345,8 +355,10 @@ void executeCommand(const String& cmd) {
   if (cmd == "F") {
       alarmActive = false;
       if (isFrontObstacle()) {
+        triggerEmergencyObstacle();
         applyRobotState(ROBOT_STOP);
       } else {
+        emergencyObstacleActive = false;
         applyRobotState(ROBOT_FORWARD);
       }
       return;
@@ -354,47 +366,55 @@ void executeCommand(const String& cmd) {
 
   if (cmd == "B") {
       alarmActive = false;
+      emergencyObstacleActive = false;
       applyRobotState(ROBOT_BACKWARD);
       return;
   }
 
   if (cmd == "L") {
       alarmActive = false;
+      emergencyObstacleActive = false;
       applyRobotState(ROBOT_LEFT);
       return;
   }
 
   if (cmd == "R") {
       alarmActive = false;
+      emergencyObstacleActive = false;
       applyRobotState(ROBOT_RIGHT);
       return;
   }
 
   if (cmd == "LL") {
       alarmActive = false;
+      emergencyObstacleActive = false;
       applyRobotState(ROBOT_ROTATE_LEFT);
       return;
   }
 
   if (cmd == "RR") {
       alarmActive = false;
+      emergencyObstacleActive = false;
       applyRobotState(ROBOT_ROTATE_RIGHT);
       return;
   }
 
   if (cmd == "S") {
       alarmActive = false;
+      emergencyObstacleActive = false;
       applyRobotState(ROBOT_STOP);
       return;
   }
 
   if (cmd == "A") {
+      emergencyObstacleActive = false;
       applyRobotState(ROBOT_ALARM);
       alarmActive = true;
       return;
   }
 
   alarmActive = false;
+  emergencyObstacleActive = false;
   applyRobotState(ROBOT_STOP);
 }
 
@@ -425,6 +445,7 @@ void updateSafetyLogic() {
   }
 
   if (robotState == ROBOT_FORWARD && isFrontObstacle()) {
+    triggerEmergencyObstacle();
     applyRobotState(ROBOT_STOP);
   }
 }
@@ -451,6 +472,31 @@ void updateOLED() {
   if (!oledReady) return;
 
   unsigned long now = millis();
+
+  // 紧急避障优先显示：SSD1306 为单色屏，使用全屏闪烁做强警示
+  if (emergencyObstacleActive) {
+    if (now - lastEmergencyOledBlinkMs >= EMERGENCY_OLED_BLINK_INTERVAL_MS) {
+      lastEmergencyOledBlinkMs = now;
+      emergencyOledBlinkOn = !emergencyOledBlinkOn;
+    }
+
+    oledDisplay.clearDisplay();
+    if (emergencyOledBlinkOn) {
+      oledDisplay.fillRect(0, 0, OLED_SCREEN_WIDTH, OLED_SCREEN_HEIGHT, SSD1306_WHITE);
+      oledDisplay.setTextColor(SSD1306_BLACK);
+    } else {
+      oledDisplay.fillRect(0, 0, OLED_SCREEN_WIDTH, OLED_SCREEN_HEIGHT, SSD1306_BLACK);
+      oledDisplay.setTextColor(SSD1306_WHITE);
+    }
+    oledDisplay.setTextSize(2);
+    oledDisplay.setCursor(8, 12);
+    oledDisplay.println("EMERGENCY");
+    oledDisplay.setCursor(24, 38);
+    oledDisplay.println("STOP");
+    oledDisplay.display();
+    return;
+  }
+
   if (now - lastOledRefreshMs < OLED_REFRESH_INTERVAL_MS) return;
   lastOledRefreshMs = now;
 
