@@ -173,8 +173,17 @@ def create_microphone_and_recognizer(
     return recognizer, mic
 
 
-def listen_english_text(recognizer: sr.Recognizer, mic: sr.Microphone, timeout: float, phrase_limit: float) -> str:
+def listen_english_text(
+    recognizer: sr.Recognizer,
+    mic: sr.Microphone,
+    timeout: Optional[float],
+    phrase_limit: Optional[float],
+    end_silence_seconds: float,
+) -> str:
     """Capture microphone audio and return recognized English text."""
+    # Stop capture when trailing silence exceeds threshold.
+    recognizer.pause_threshold = end_silence_seconds
+    recognizer.non_speaking_duration = min(end_silence_seconds, 1.0)
     with mic as source:
         print("\n[Mic] Listening... Please speak English.")
         recognizer.adjust_for_ambient_noise(source, duration=0.8)
@@ -208,23 +217,15 @@ def ask_llm(user_text: str, model: str, base_url: str, api_key: str, system_prom
 
 def prepare_tts_text(text: str, max_chars: int = 180) -> str:
     """
-    Make TTS faster by speaking a compact version:
+    Clean text for TTS:
     - remove stage directions like *wags tail*
-    - remove most emoji/non-ascii symbols
-    - keep first 1-2 short sentences
-    - clamp final length
+    - remove emoji / non-ASCII symbols
     """
-    compact = re.sub(r"\*[^*]{0,120}\*", " ", text)
-    compact = compact.encode("ascii", "ignore").decode("ascii")
-    compact = re.sub(r"\s+", " ", compact).strip()
-
-    # Keep first two sentence-like chunks for quicker synthesis.
-    chunks = re.split(r"(?<=[.!?])\s+", compact)
-    compact = " ".join(chunks[:2]).strip() if chunks else compact
-
-    if len(compact) > max_chars:
-        compact = compact[:max_chars].rstrip() + "..."
-    return compact or "Woof!"
+    _ = max_chars  # kept for backward-compatible function signature
+    cleaned = re.sub(r"\*[^*]{0,120}\*", " ", text)
+    cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or "Woof!"
 
 
 def speak_english(
@@ -292,8 +293,24 @@ def main() -> int:
         description="Microphone English speech -> LLM API -> English speaker output"
     )
     parser.add_argument("--once", action="store_true", help="Run one turn only, then exit")
-    parser.add_argument("--timeout", type=float, default=8.0, help="Mic listen timeout seconds")
-    parser.add_argument("--phrase-limit", type=float, default=12.0, help="Max speech chunk duration seconds")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="Seconds to wait for user to start speaking; default None waits indefinitely",
+    )
+    parser.add_argument(
+        "--phrase-limit",
+        type=float,
+        default=None,
+        help="Max speech chunk duration; default None lets speech end by silence",
+    )
+    parser.add_argument(
+        "--end-silence-seconds",
+        type=float,
+        default=3.0,
+        help="Stop recording after this many silent seconds",
+    )
     parser.add_argument(
         "--system-prompt",
         default="You are a concise, friendly assistant. Always answer in clear English.",
@@ -362,6 +379,7 @@ def main() -> int:
                 mic=mic,
                 timeout=args.timeout,
                 phrase_limit=args.phrase_limit,
+                end_silence_seconds=args.end_silence_seconds,
             )
             if not user_text:
                 print("[ASR] Empty text, skipping.")
