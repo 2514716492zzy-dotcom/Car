@@ -1,0 +1,5 @@
+.env
+*.pyc
+*.mp3
+*.pyc
+/modules/llm/__pycache__

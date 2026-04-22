@@ -1,0 +1,24 @@
+{
+  "frame_size": [
+    320,
+    240
+  ],
+  "metric": "normalized_area",
+  "far_threshold": 0.05978190104166667,
+  "close_threshold": 0.15892252604166668,
+  "x_tolerance_norm": 0.12,
+  "min_frames_for_decision": 3,
+  "min_command_interval_s": 0.5,
+  "lost_frames_threshold": 5,
+  "use_obstacle_check": false,
+  "safety_distance_cm": 20,
+  "haar_cascade": null,
+  "visualize": true,
+  "camera_index": 0,
+  "decision_interval_s": 0.6,
+  "calibration_medians": {
+    "far": 0.037268880208333334,
+    "ideal": 0.082294921875,
+    "close": 0.23555013020833335
+  }
+}

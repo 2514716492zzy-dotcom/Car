@@ -1,0 +1,7 @@
+python-dotenv
+pyserial
+openai==2.7.1
+SpeechRecognition==3.14.3
+gTTS==2.5.4
+langchain-core
+requests

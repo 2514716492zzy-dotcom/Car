@@ -1,0 +1,17 @@
+{
+  "movement": {
+    "forward": "A",
+    "backward": "E",
+    "left": "H",
+    "right": "B",
+    "rotate_left": "C",
+    "rotate_right": "G",
+    "stop": "Z"
+  },
+  "behavior": {
+    "follow_me": "F",
+    "wander": "D",
+    "spray": "W",
+    "return": "R"
+  }
+}
