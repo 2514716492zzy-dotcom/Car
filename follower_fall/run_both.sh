@@ -32,7 +32,7 @@ else
 fi
 
 echo "[INFO] Starting follow script..."
-conda run --no-capture-output -n "$CONDA_ENV" \
+stdbuf -oL -eL conda run --no-capture-output -n "$CONDA_ENV" \
   python3 "$ROOT_DIR/test_FB_first.py" 2>&1 \
   | stdbuf -oL awk '{print "[FOLLOW] " $0; fflush();}' \
   | tee -a "$FOLLOW_LOG" &
@@ -40,13 +40,13 @@ FOLLOW_PID=$!
 echo "[INFO] follow stream PID: $FOLLOW_PID (log: $FOLLOW_LOG)"
 
 echo "[INFO] Starting voice script..."
-conda run --no-capture-output -n "$CONDA_ENV" \
-  python3 "$ROOT_DIR/voice_llm_speaker.py" \
+stdbuf -oL -eL conda run --no-capture-output -n "$CONDA_ENV" \
+  python3 -u "$ROOT_DIR/voice_llm_speaker.py" \
   --player mpg123 \
   --linux-speaker-device hw:2,0 \
   --mic-keyword Yundea \
   "${VOICE_MIC_ARGS[@]}" 2>&1 \
-  | stdbuf -oL awk '{print "[SPEAK] " $0; fflush();}' \
+  | stdbuf -oL awk '{print "[SPEAKER] " $0; fflush();}' \
   | tee -a "$VOICE_LOG" &
 VOICE_PID=$!
 echo "[INFO] voice stream PID: $VOICE_PID (log: $VOICE_LOG)"
