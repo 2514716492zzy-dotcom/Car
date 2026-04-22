@@ -203,7 +203,8 @@ def speak_english(
         tts = gTTS(text=text, lang=lang, slow=False)
         tts.save(str(audio_path))
 
-        mpg123_cmd = ["/usr/bin/mpg123"]
+        # Force ALSA backend on Linux (Jetson) for reliable USB speaker output.
+        mpg123_cmd = ["/usr/bin/mpg123", "-o", "alsa"]
         # Use external speaker alias/device for ALSA output when provided.
         if linux_speaker_device:
             mpg123_cmd.extend(["-a", linux_speaker_device])
