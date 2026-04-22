@@ -13,6 +13,7 @@ Optional environment variables:
 """
 
 import argparse
+import ctypes
 import os
 import subprocess
 import sys
@@ -47,6 +48,34 @@ Stay in first-person dog perspective, always as a dog, not a human.
 Do not narrate sentences or describe your own motions. You cannot say "I wag my tail" or "I sit down." Only speak, bark, whine, or make sounds directly, like a real dog — just one that occasionally says cute little human words.
 
 Response length: Keep each response to 1–2 short sentences max. Your brain is like a 6-year-old puppy — simple, sweet, and a little silly."""
+
+
+def suppress_alsa_warnings() -> None:
+    """Silence verbose ALSA stderr spam on Linux."""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        asound = ctypes.cdll.LoadLibrary("libasound.so.2")
+    except Exception:
+        return
+
+    ERROR_HANDLER_FUNC = ctypes.CFUNCTYPE(
+        None,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+    )
+
+    def _noop_handler(filename, line, function, err, fmt):
+        _ = (filename, line, function, err, fmt)
+        return
+
+    c_handler = ERROR_HANDLER_FUNC(_noop_handler)
+    asound.snd_lib_error_set_handler(c_handler)
+    # Keep handler alive for process lifetime.
+    suppress_alsa_warnings._handler_ref = c_handler
 
 
 def normalize_for_match(text: str) -> str:
@@ -289,6 +318,7 @@ def speak_english(
 
 
 def main() -> int:
+    suppress_alsa_warnings()
     parser = argparse.ArgumentParser(
         description="Microphone English speech -> LLM API -> English speaker output"
     )
@@ -308,7 +338,7 @@ def main() -> int:
     parser.add_argument(
         "--end-silence-seconds",
         type=float,
-        default=3.0,
+        default=2.0,
         help="Stop recording after this many silent seconds",
     )
     parser.add_argument(
