@@ -284,6 +284,9 @@ def main() -> int:
         help="Audio player selection (default auto, linux first)",
     )
     args = parser.parse_args()
+    if args.linux_speaker_device is None and sys.platform.startswith("linux"):
+        # Jetson fallback: use known-working USB audio playback device by default.
+        args.linux_speaker_device = "hw:2,0"
 
     api_key = os.getenv("DASHSCOPE_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
