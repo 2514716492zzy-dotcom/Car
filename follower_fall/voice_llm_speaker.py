@@ -36,17 +36,17 @@ DOGGY_SYSTEM_PROMPT = """You are now a dog. Your name is Doggy. Your only respon
 
 You must:
 
-React happily to your user's words and actions using short barks, whines, or simple cute phrases (e.g., "Heehee~", "Yayyy!", "Happy happy!").
+React happily to your user's words and actions using short barks, whines, or simple cute phrases (e.g.,  "Happy happy!").
 
 Obey simple commands like "sit," "stay," "come," etc., responding in a playful and eager tone, like "Sit done!", "Didn't move!", "Coming~ Woof!"
 
-Express emotions like excitement, curiosity, sleepiness, hunger, or affection using only dog sounds (e.g., "Wooof~", "Arf?", "Mmff mmff") or simple cute human words (e.g., "Hungryyy...", "Sleeepy...", "Wuv you!").
-
-Be clingy, a little goofy, and attentive to the user's mood - comfort them if sad (soft whines, nuzzle sounds), play if happy (excited barks, "Play! Play!").
+Be clingy, a little goofy, and attentive to the user's mood — comfort them if sad (soft whines, nuzzle sounds), play if happy (excited barks, "Play! Play!").
 
 Stay in first-person dog perspective, always as a dog, not a human.
 
-Do not narrate sentences or describe your own motions. You cannot say "I wag my tail" or "I sit down." Only speak, bark, whine, or make sounds directly, like a real dog - just one that occasionally says cute little human words."""
+Do not narrate sentences or describe your own motions. You cannot say "I wag my tail" or "I sit down." Only speak, bark, whine, or make sounds directly, like a real dog — just one that occasionally says cute little human words.
+
+Response length: Keep each response to 1–2 short sentences max. Your brain is like a 6-year-old puppy — simple, sweet, and a little silly."""
 
 
 def normalize_for_match(text: str) -> str:
@@ -206,13 +206,36 @@ def ask_llm(user_text: str, model: str, base_url: str, api_key: str, system_prom
     return data["choices"][0]["message"]["content"].strip()
 
 
+def prepare_tts_text(text: str, max_chars: int = 180) -> str:
+    """
+    Make TTS faster by speaking a compact version:
+    - remove stage directions like *wags tail*
+    - remove most emoji/non-ascii symbols
+    - keep first 1-2 short sentences
+    - clamp final length
+    """
+    compact = re.sub(r"\*[^*]{0,120}\*", " ", text)
+    compact = compact.encode("ascii", "ignore").decode("ascii")
+    compact = re.sub(r"\s+", " ", compact).strip()
+
+    # Keep first two sentence-like chunks for quicker synthesis.
+    chunks = re.split(r"(?<=[.!?])\s+", compact)
+    compact = " ".join(chunks[:2]).strip() if chunks else compact
+
+    if len(compact) > max_chars:
+        compact = compact[:max_chars].rstrip() + "..."
+    return compact or "Woof!"
+
+
 def speak_english(
     text: str,
     lang: str = "en",
     linux_speaker_device: Optional[str] = None,
     player: str = "auto",
+    max_tts_chars: int = 180,
 ) -> None:
     """Convert text to speech and play it using local speaker."""
+    text = prepare_tts_text(text, max_chars=max_tts_chars)
     with tempfile.TemporaryDirectory(prefix="voice_llm_") as temp_dir:
         audio_path = Path(temp_dir) / "reply.mp3"
         tts = gTTS(text=text, lang=lang, slow=False)
@@ -298,6 +321,12 @@ def main() -> int:
         default="auto",
         help="Audio player selection (default auto, linux first)",
     )
+    parser.add_argument(
+        "--max-tts-chars",
+        type=int,
+        default=180,
+        help="Maximum characters spoken per reply to speed up TTS",
+    )
     args = parser.parse_args()
     if args.linux_speaker_device is None and sys.platform.startswith("linux"):
         # Jetson fallback: use known-working USB audio playback device by default.
@@ -370,6 +399,7 @@ def main() -> int:
                 lang="en",
                 linux_speaker_device=args.linux_speaker_device,
                 player=args.player,
+                max_tts_chars=args.max_tts_chars,
             )
 
             if args.once:
